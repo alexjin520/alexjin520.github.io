@@ -1,8 +1,8 @@
 ---
 layout: page
-title: 项目
+title: projects
 permalink: /projects/
-description: 记录正在开发、维护和探索的项目。
+description: A collection of projects I build, maintain, and explore.
 nav: true
 nav_order: 2
 display_categories: []

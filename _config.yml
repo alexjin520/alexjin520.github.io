@@ -7,14 +7,14 @@ first_name: Alex
 middle_name:
 last_name: Jin
 contact_note: >
-  欢迎通过 GitHub 与我交流。
+  Feel free to reach out through GitHub.
 description: > # the ">" symbol means to ignore newlines until "footer_text:"
-  Alex Jin 的个人主页，记录软件开发、嵌入式技术、项目与思考。
+  Alex Jin's personal website for software development, embedded systems, projects, and notes.
 footer_text: >
   Powered by <a href="https://jekyllrb.com/" target="_blank">Jekyll</a> with <a href="https://github.com/alshedivat/al-folio">al-folio</a> theme.
   Hosted by <a href="https://pages.github.com/" target="_blank">GitHub Pages</a>.
 keywords: Alex Jin, software development, embedded systems, open source, technical blog
-lang: zh-CN
+lang: en
 icon: 🛠️
 
 url: https://alexjin520.github.io
@@ -121,8 +121,8 @@ bing_site_verification: # out your bing-site-verification ID (Bing Webmaster)
 # Blog
 # -----------------------------------------------------------------------------
 
-blog_name: Alex 的技术笔记
-blog_description: 记录软件开发、嵌入式技术与持续探索
+blog_name: Alex's Technical Notes
+blog_description: Notes on software development, embedded systems, and continuous learning
 permalink: /blog/:year/:title/
 lsi: false # produce an index for related posts
 
@@ -148,7 +148,7 @@ giscus:
   dark_theme: dark # name of the dark color scheme (preferred works well with al-folio dark mode)
   light_theme: light # name of the light color scheme (preferred works well with al-folio light mode)
   emit_metadata: 0
-  lang: zh-CN
+  lang: en
 
 # Disqus comments (DEPRECATED)
 disqus_shortname:
@@ -316,8 +316,8 @@ jekyll-archives:
       tags: "/blog/:type/:name/"
       categories: "/blog/:type/:name/"
 
-display_tags: ["嵌入式", "Linux", "编程", "开源"]
-display_categories: ["技术笔记"]
+display_tags: ["Embedded Systems", "Linux", "Programming", "Open Source"]
+display_categories: ["Technical Notes"]
 
 # -----------------------------------------------------------------------------
 # Jekyll Scholar
@@ -412,7 +412,7 @@ external_links:
 # MAKE SURE imagemagick is installed and on your PATH before enabling imagemagick. In a terminal, run:
 #   convert -version
 imagemagick:
-  enabled: false # 添加本地头像或项目图片后可重新开启
+  enabled: false # Re-enable after adding local profile or project images.
   widths:
     - 480
     - 800

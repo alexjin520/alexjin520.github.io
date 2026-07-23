@@ -1,8 +1,8 @@
 ---
 layout: about
-title: 关于
+title: about
 permalink: /
-subtitle: 软件开发 · 嵌入式技术 · 开源
+subtitle: Software Development · Embedded Systems · Open Source
 
 profile: false
 
@@ -18,16 +18,16 @@ latest_posts:
   limit: 3
 ---
 
-你好，我是 **Alex Jin**，一名热爱技术与创造的开发者。
+Hello, I am **Alex Jin**, a developer who enjoys technology and creating useful things.
 
-我关注软件开发、嵌入式技术与开源生态，喜欢研究系统背后的运行原理，也享受从零构建产品的过程。
+I am interested in software development, embedded systems, and open source. I enjoy understanding how systems work and turning ideas into practical projects.
 
-这个网站是我的数字花园。我会在这里整理技术笔记、记录项目实践，并分享持续探索过程中的经验与思考。
+This website is my digital garden. I use it to organize technical notes, document project work, and share what I learn along the way.
 
-### 关注方向
+### Areas of Interest
 
-- 嵌入式 Linux 与系统开发
-- 软件工程与开发工具
-- 开源项目与工程实践
+- Embedded Linux and systems development
+- Software engineering and developer tools
+- Open-source projects and engineering practices
 
-你可以在 [GitHub](https://github.com/alexjin520) 查看我正在开发和维护的项目。
+Visit my [GitHub profile](https://github.com/alexjin520) to see the projects I am building and maintaining.
