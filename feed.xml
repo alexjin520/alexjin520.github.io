@@ -1,1 +1,129 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="https://alexjin520.github.io/feed.xml" rel="self" type="application/atom+xml"/><link href="https://alexjin520.github.io/" rel="alternate" type="text/html" hreflang="en"/><updated>2026-07-23T03:02:18+00:00</updated><id>https://alexjin520.github.io/feed.xml</id><title type="html">Alex Jin</title><subtitle>Alex Jin&apos;s personal website for software development, embedded systems, projects, and notes. </subtitle><entry><title type="html">Hello, World</title><link href="https://alexjin520.github.io/blog/2026/hello-world/" rel="alternate" type="text/html" title="Hello, World"/><published>2026-07-23T02:00:00+00:00</published><updated>2026-07-23T02:00:00+00:00</updated><id>https://alexjin520.github.io/blog/2026/hello-world</id><content type="html" xml:base="https://alexjin520.github.io/blog/2026/hello-world/"><![CDATA[<p>Welcome to my technical blog.</p> <p>This website has grown from a small static homepage into a content-focused site powered by Jekyll and al-folio. It now supports personal information, project pages, and an expanding technical blog.</p> <p>I plan to write about:</p> <ul> <li>Embedded Linux and systems development</li> <li>Problems encountered in software development and how I solved them</li> <li>The design and implementation of open-source projects</li> </ul> <p>To publish a new article, I can add a Markdown file to the <code class="language-plaintext highlighter-rouge">_posts</code> directory and push it to GitHub. The site will build and deploy automatically.</p>]]></content><author><name></name></author><category term="Technical Notes"/><category term="Open Source"/><category term="Programming"/><summary type="html"><![CDATA[My upgraded personal website is ready for technical notes, projects, and ideas.]]></summary></entry></feed>
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="https://alexjin520.github.io/feed.xml" rel="self" type="application/atom+xml"/><link href="https://alexjin520.github.io/" rel="alternate" type="text/html" hreflang="en"/><updated>2026-07-23T06:15:55+00:00</updated><id>https://alexjin520.github.io/feed.xml</id><title type="html">Alex Jin</title><subtitle>Alex Jin&apos;s personal website for software development, embedded systems, projects, and notes. </subtitle><entry><title type="html">Understanding Event-Driven I/O with libevent and libuv</title><link href="https://alexjin520.github.io/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/" rel="alternate" type="text/html" title="Understanding Event-Driven I/O with libevent and libuv"/><published>2026-07-23T06:00:00+00:00</published><updated>2026-07-23T06:00:00+00:00</updated><id>https://alexjin520.github.io/blog/2026/understanding-event-driven-io-with-libevent-and-libuv</id><content type="html" xml:base="https://alexjin520.github.io/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/"><![CDATA[<p>Over the past few days, I have been learning how <strong>libevent</strong> and <strong>libuv</strong> organize asynchronous I/O. The individual APIs are not the hardest part. The real challenge is building the right mental model:</p> <ul> <li>What exactly is a file descriptor?</li> <li>What does “non-blocking” mean?</li> <li>If an event loop has only one thread, how can it handle several devices?</li> <li>When multiple events arrive together, which callback runs?</li> <li>If threads can run in parallel, why use a single-threaded event loop at all?</li> </ul> <p>This article records the answers that finally made the model clear to me.</p> <h2 id="1-start-with-file-descriptors">1. Start with file descriptors</h2> <p>On Linux, a <strong>file descriptor</strong>, usually abbreviated as <strong>fd</strong>, is a small integer that identifies an open resource inside a process.</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>fd 0  -&gt; standard input
+fd 1  -&gt; standard output
+fd 2  -&gt; standard error
+fd 4  -&gt; a CAN socket
+fd 5  -&gt; a UART device
+fd 6  -&gt; a listening socket
+</code></pre></div></div> <p>The descriptor is not the resource itself. It is a handle that the process uses when asking the kernel to operate on that resource:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+<span class="n">write</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">length</span><span class="p">);</span>
+<span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>
+</code></pre></div></div> <p>This common interface is important because an event library can monitor many different resources in the same way. A TCP socket, a CAN socket, a pipe, a <code class="language-plaintext highlighter-rouge">timerfd</code>, and some device files can all participate in one event loop.</p> <h2 id="2-why-blocking-io-becomes-a-problem">2. Why blocking I/O becomes a problem</h2> <p>Consider a normal blocking read:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">read</span><span class="p">(</span><span class="n">can_fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>
+</code></pre></div></div> <p>If no CAN frame is available, the calling thread waits. While it is waiting, that thread cannot process a UART message, a Bluetooth request, or an expired timer.</p> <p>A naive program might try to check every source repeatedly:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">while</span> <span class="p">(</span><span class="n">running</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">check_can</span><span class="p">();</span>
+    <span class="n">check_uart</span><span class="p">();</span>
+    <span class="n">check_bluetooth</span><span class="p">();</span>
+    <span class="n">check_timers</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></div></div> <p>This is polling. It can waste CPU time when nothing is happening, and it becomes awkward as the number of event sources grows.</p> <p>Linux provides a better mechanism through facilities such as <code class="language-plaintext highlighter-rouge">epoll</code>: the application tells the kernel which descriptors it is interested in, and the kernel reports which ones are ready.</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CAN fd  -----\
+UART fd ------&gt; kernel waits for readiness ---&gt; event loop wakes up
+GATT fd -----/
+timerfd -----/
+</code></pre></div></div> <p>The application does not wait on one device at a time. The kernel waits on all registered sources together.</p> <h2 id="3-the-event-loop-model">3. The event loop model</h2> <p>At a high level, an event loop behaves like this:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>while the application is running:
+    wait until one or more events are ready
+    mark those events as active
+    call the callback associated with each active event
+</code></pre></div></div> <p>With libevent, a read event may be registered like this:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">can_event</span> <span class="o">=</span> <span class="n">event_new</span><span class="p">(</span>
+    <span class="n">base</span><span class="p">,</span>
+    <span class="n">can_fd</span><span class="p">,</span>
+    <span class="n">EV_READ</span> <span class="o">|</span> <span class="n">EV_PERSIST</span><span class="p">,</span>
+    <span class="n">can_read_callback</span><span class="p">,</span>
+    <span class="n">context</span>
+<span class="p">);</span>
+
+<span class="n">event_add</span><span class="p">(</span><span class="n">can_event</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+</code></pre></div></div> <p>This says:</p> <blockquote> <p>Monitor <code class="language-plaintext highlighter-rouge">can_fd</code>. Whenever it becomes readable, call <code class="language-plaintext highlighter-rouge">can_read_callback</code>.</p> </blockquote> <p>libuv expresses the same general architecture with different types and APIs. Both libraries connect operating-system event notification to application callbacks.</p> <h2 id="4-what-happens-when-several-events-arrive">4. What happens when several events arrive?</h2> <p>Suppose the application has registered three callbacks:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CAN fd  ready -&gt; can_callback()
+UART fd ready -&gt; uart_callback()
+GATT fd ready -&gt; gatt_callback()
+</code></pre></div></div> <p>If all three descriptors become ready, the event loop activates all three events. In a single-threaded loop, the callbacks are normally executed one after another:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>can_callback()
+uart_callback()
+gatt_callback()
+</code></pre></div></div> <p>The order may vary unless explicit priorities are configured, so application correctness should not depend on an accidental ordering between events of equal priority.</p> <p>Sequential execution is not the same as blocking. A callback that processes already-available data and returns quickly is simply taking its turn. Blocking occurs when the callback waits for something that has not happened yet.</p> <p>For example, this is dangerous:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">void</span> <span class="nf">can_callback</span><span class="p">(</span><span class="kt">int</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">short</span> <span class="n">events</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>  <span class="cm">/* current frame */</span>
+    <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>  <span class="cm">/* may wait for a future frame */</span>
+<span class="p">}</span>
+</code></pre></div></div> <p>A common non-blocking pattern is to drain the data that is already available and stop when the kernel reports <code class="language-plaintext highlighter-rouge">EAGAIN</code>:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">void</span> <span class="nf">can_callback</span><span class="p">(</span><span class="kt">int</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">short</span> <span class="n">events</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">for</span> <span class="p">(;;)</span> <span class="p">{</span>
+        <span class="kt">ssize_t</span> <span class="n">n</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">process_frame</span><span class="p">(</span><span class="n">buffer</span><span class="p">,</span> <span class="n">n</span><span class="p">);</span>
+            <span class="k">continue</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="n">errno</span> <span class="o">==</span> <span class="n">EAGAIN</span> <span class="o">||</span> <span class="n">errno</span> <span class="o">==</span> <span class="n">EWOULDBLOCK</span><span class="p">))</span>
+            <span class="k">break</span><span class="p">;</span>
+
+        <span class="k">break</span><span class="p">;</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div> <p>The callback then returns control to the event loop so that other ready events can run.</p> <h2 id="5-asynchronous-and-non-blocking-are-related-but-different">5. Asynchronous and non-blocking are related, but different</h2> <p>These two terms are often used together:</p> <ul> <li><strong>Non-blocking</strong> describes an operation that returns immediately when it cannot make progress.</li> <li><strong>Asynchronous</strong> describes a control flow in which work is started now and its completion is handled later.</li> </ul> <p>For example:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>register interest in a socket
+        |
+        v
+continue handling other work
+        |
+        v
+kernel reports that the socket is readable
+        |
+        v
+event loop invokes the read callback
+</code></pre></div></div> <p>The application expresses interest at one point in time and receives the result later through a callback. No thread has to remain blocked on that socket.</p> <h2 id="6-a-practical-embedded-example-can-and-sampling">6. A practical embedded example: CAN and sampling</h2> <p>This model became much clearer when I applied it to an embedded acquisition system containing CAN, UART, Bluetooth GATT, and a sampling state machine.</p> <p>The design has two important event sources:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CAN fd readable event  -&gt; receive and parse CAN frames
+1 ms timer event       -&gt; advance the sampling state machine
+</code></pre></div></div> <p>Sampling is not implemented as one long blocking function. Instead, it is split into small phases:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>configure an LED over CAN
+        |
+wait until a deadline, without sleeping
+        |
+send a sampling command
+        |
+request data from a node
+        |
+return to the event loop
+        |
+CAN response arrives and activates the CAN callback
+        |
+store the response and mark the node as ready
+        |
+a later timer tick advances the state machine
+</code></pre></div></div> <p>The key point is that CAN reception and sampling are not two large tasks where one must finish completely before the other begins. They cooperate:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sampling tick sends a CAN request
+CAN callback receives the response
+next sampling tick observes the response
+sampling state machine continues
+</code></pre></div></div> <p>Waiting is represented as state plus a deadline, not as <code class="language-plaintext highlighter-rouge">sleep()</code>:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">state</span><span class="o">-&gt;</span><span class="n">deadline_ms</span> <span class="o">=</span> <span class="n">now_ms</span> <span class="o">+</span> <span class="mi">3</span><span class="p">;</span>
+<span class="n">state</span><span class="o">-&gt;</span><span class="n">phase</span> <span class="o">=</span> <span class="n">WAIT_FOR_LED</span><span class="p">;</span>
+<span class="k">return</span><span class="p">;</span>
+</code></pre></div></div> <p>On later timer ticks:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">if</span> <span class="p">(</span><span class="n">now_ms</span> <span class="o">&lt;</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">deadline_ms</span><span class="p">)</span>
+    <span class="k">return</span><span class="p">;</span>
+
+<span class="n">state</span><span class="o">-&gt;</span><span class="n">phase</span> <span class="o">=</span> <span class="n">START_ADC</span><span class="p">;</span>
+</code></pre></div></div> <p>During those three milliseconds, the main thread remains free to process CAN, UART, GATT, and other timers.</p> <h2 id="7-why-a-single-threaded-loop-is-still-useful">7. Why a single-threaded loop is still useful</h2> <p>At first, a single-threaded event loop can look inferior to multiple threads. Multiple threads can run on several CPU cores, while callbacks on one loop execute sequentially.</p> <p>The missing detail is that I/O-driven programs usually spend much more time waiting than computing. The event loop lets the kernel wait for many I/O sources simultaneously, then performs only the short amount of work required for each ready event.</p> <p>A single-threaded event loop provides several useful properties:</p> <ul> <li>Shared state is naturally serialized.</li> <li>Callback ordering is easier to reason about.</li> <li>Fewer mutexes are required.</li> <li>Deadlocks and data races are less likely.</li> <li>Thread stacks and context switches are reduced.</li> <li>Startup and shutdown become simpler.</li> </ul> <p>In an embedded system, a Bluetooth command, a CAN response, and a sampling timer may all touch the same state. Running their small handlers on one thread often makes the system more deterministic than allowing three threads to modify that state concurrently.</p> <p>This does not mean that threads are bad. They are valuable for:</p> <ul> <li>CPU-intensive signal processing</li> <li>Compression or encryption</li> <li>Blocking APIs that cannot be converted to event-driven I/O</li> <li>Long-running work that would delay other callbacks</li> </ul> <p>The practical design is often hybrid:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>main event-loop thread
+├── CAN
+├── UART
+├── GATT
+├── timers
+└── state machines
+
+worker threads
+├── expensive calculations
+└── unavoidable blocking operations
+</code></pre></div></div> <p>The rule is simple: keep event-loop callbacks short, and move genuinely expensive or blocking work elsewhere.</p> <h2 id="8-how-worker-threads-notify-the-event-loop">8. How worker threads notify the event loop</h2> <p>A worker thread does not automatically become part of the main event loop. It needs a thread-safe notification mechanism.</p> <p>libuv provides <code class="language-plaintext highlighter-rouge">uv_async_send()</code> for this purpose:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>worker thread
+    |
+    | uv_async_send()
+    v
+main event loop wakes up
+    |
+    v
+async callback runs on the loop thread
+</code></pre></div></div> <p>With libevent on Linux, a similar mechanism can be built using an <code class="language-plaintext highlighter-rouge">eventfd</code>, pipe, or socket pair:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>worker thread
+    |
+    | enqueue result
+    | write(eventfd)
+    v
+eventfd becomes readable
+    |
+    v
+libevent invokes its callback on the main thread
+    |
+    v
+main thread consumes the queued result
+</code></pre></div></div> <p>The notification transfers control back to the event-loop thread. Shared data still needs a mutex, atomics, or a thread-safe queue.</p> <h2 id="9-libevent-and-libuv-the-common-idea">9. libevent and libuv: the common idea</h2> <p>libevent and libuv differ in API design and scope, but the central model is similar:</p> <table> <thead> <tr> <th>Concept</th> <th>libevent</th> <th>libuv</th> </tr> </thead> <tbody> <tr> <td>Event loop</td> <td><code class="language-plaintext highlighter-rouge">event_base</code></td> <td><code class="language-plaintext highlighter-rouge">uv_loop_t</code></td> </tr> <tr> <td>I/O readiness</td> <td><code class="language-plaintext highlighter-rouge">event_new()</code> and callbacks</td> <td>stream, poll, and handle callbacks</td> </tr> <tr> <td>Timers</td> <td>timer events</td> <td><code class="language-plaintext highlighter-rouge">uv_timer_t</code></td> </tr> <tr> <td>Cross-thread notification</td> <td>commonly <code class="language-plaintext highlighter-rouge">eventfd</code>, pipe, or <code class="language-plaintext highlighter-rouge">event_active()</code> with configured threading</td> <td><code class="language-plaintext highlighter-rouge">uv_async_t</code> and <code class="language-plaintext highlighter-rouge">uv_async_send()</code></td> </tr> <tr> <td>Worker execution</td> <td>application threads or external thread pools</td> <td><code class="language-plaintext highlighter-rouge">uv_queue_work()</code> and the libuv thread pool</td> </tr> </tbody> </table> <p>libuv offers a broader cross-platform abstraction for networking, files, processes, DNS, and threads. libevent focuses strongly on event notification, timers, and network-oriented building blocks. Choosing between them depends on the application, but understanding either one teaches the same fundamental lesson:</p> <blockquote> <p>Do not block while waiting for I/O. Register interest, return control to the loop, and react when the event becomes ready.</p> </blockquote> <h2 id="10-the-mental-model-i-will-keep">10. The mental model I will keep</h2> <p>My final mental model is:</p> <ol> <li>An fd is a process-local handle for a kernel resource.</li> <li>The kernel can monitor many fds at the same time.</li> <li>The event loop maps each ready fd or timer to a callback.</li> <li>Several active callbacks normally run sequentially on the loop thread.</li> <li>Sequential does not mean blocking.</li> <li>A callback blocks the loop only when it waits or performs excessive work.</li> <li>Long workflows should be split into short state-machine steps.</li> <li>Threads are useful for real parallel work, but they must notify the main loop explicitly.</li> </ol> <p>Once I stopped imagining the event loop as “one thread waiting on one device,” the architecture made sense. It is one thread coordinating many sources of readiness, while the operating system performs the waiting efficiently.</p>]]></content><author><name></name></author><category term="Technical Notes"/><category term="Linux"/><category term="Programming"/><category term="Embedded Systems"/><summary type="html"><![CDATA[What I learned about file descriptors, non-blocking I/O, event loops, callbacks, and the boundary between event-driven code and threads.]]></summary></entry><entry><title type="html">Hello, World</title><link href="https://alexjin520.github.io/blog/2026/hello-world/" rel="alternate" type="text/html" title="Hello, World"/><published>2026-07-23T02:00:00+00:00</published><updated>2026-07-23T02:00:00+00:00</updated><id>https://alexjin520.github.io/blog/2026/hello-world</id><content type="html" xml:base="https://alexjin520.github.io/blog/2026/hello-world/"><![CDATA[<p>Welcome to my technical blog.</p> <p>This website has grown from a small static homepage into a content-focused site powered by Jekyll and al-folio. It now supports personal information, project pages, and an expanding technical blog.</p> <p>I plan to write about:</p> <ul> <li>Embedded Linux and systems development</li> <li>Problems encountered in software development and how I solved them</li> <li>The design and implementation of open-source projects</li> </ul> <p>To publish a new article, I can add a Markdown file to the <code class="language-plaintext highlighter-rouge">_posts</code> directory and push it to GitHub. The site will build and deploy automatically.</p>]]></content><author><name></name></author><category term="Technical Notes"/><category term="Open Source"/><category term="Programming"/><summary type="html"><![CDATA[My upgraded personal website is ready for technical notes, projects, and ideas.]]></summary></entry></feed>
