@@ -36,7 +36,18 @@ ninja.data = [{
           handler: () => {
             window.location.href = "/projects/";
           },
-        },{id: "post-understanding-event-driven-i-o-with-libevent-and-libuv",
+        },{id: "post-crossing-thread-boundaries-safely-in-libevent",
+        
+          title: "Crossing Thread Boundaries Safely in libevent",
+        
+        description: "How I connected a BlueZ GATT thread to a libevent main loop using an eventfd, a protected job queue, and a socketpair response channel.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/crossing-thread-boundaries-in-libevent/";
+          
+        },
+      },{id: "post-understanding-event-driven-i-o-with-libevent-and-libuv",
         
           title: "Understanding Event-Driven I/O with libevent and libuv",
         
@@ -45,17 +56,6 @@ ninja.data = [{
         handler: () => {
           
             window.location.href = "/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/";
-          
-        },
-      },{id: "post-hello-world",
-        
-          title: "Hello, World",
-        
-        description: "My upgraded personal website is ready for technical notes, projects, and ideas.",
-        section: "Posts",
-        handler: () => {
-          
-            window.location.href = "/blog/2026/hello-world/";
           
         },
       },{id: "projects-github-projects",

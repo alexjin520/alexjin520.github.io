@@ -1,4 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://jekyllrb.com/" version="4.4.1">Jekyll</generator><link href="https://alexjin520.github.io/feed.xml" rel="self" type="application/atom+xml"/><link href="https://alexjin520.github.io/" rel="alternate" type="text/html" hreflang="en"/><updated>2026-07-23T07:23:36+00:00</updated><id>https://alexjin520.github.io/feed.xml</id><title type="html">Alex Jin</title><subtitle>Alex Jin&apos;s personal website for software development, embedded systems, projects, and notes. </subtitle><entry><title type="html">Crossing Thread Boundaries Safely in libevent</title><link href="https://alexjin520.github.io/blog/2026/crossing-thread-boundaries-in-libevent/" rel="alternate" type="text/html" title="Crossing Thread Boundaries Safely in libevent"/><published>2026-07-23T07:12:00+00:00</published><updated>2026-07-23T07:12:00+00:00</updated><id>https://alexjin520.github.io/blog/2026/crossing-thread-boundaries-in-libevent</id><content type="html" xml:base="https://alexjin520.github.io/blog/2026/crossing-thread-boundaries-in-libevent/"><![CDATA[<p>In my previous article, I described the basic event-loop model: register file descriptors, keep callbacks short, and let the kernel wake the application when work is ready.</p> <p>That model becomes more interesting when a library already owns another thread and another main loop.</p> <p>I encountered exactly this problem while integrating a Bluetooth GATT server into an embedded fNIRS acquisition program. The application used <strong>libevent</strong> for CAN, UART, timers, and sampling state machines, while the GATT server used the <strong>BlueZ</strong> mainloop in a separate thread.</p> <p>Both sides needed to access the same device state:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>GATT thread                              libevent main thread
+<!DOCTYPE html> <html lang="en"> <head> <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"> <meta charset="utf-8"> <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"> <meta http-equiv="X-UA-Compatible" content="IE=edge"> <title> Crossing Thread Boundaries Safely in libevent | Alex Jin </title> <meta name="author" content="Alex Jin"> <meta name="description" content="How I connected a BlueZ GATT thread to a libevent main loop using an eventfd, a protected job queue, and a socketpair response channel."> <meta name="keywords" content="Alex Jin, software development, embedded systems, open source, technical blog"> <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' data: https:; media-src 'self' https:; frame-src 'self' https:; connect-src 'self' https:;"> <style>
+  :root {
+    --max-content-width: 930px;
+  }
+</style> <link rel="stylesheet" href="/assets/css/tailwind.css?v=50c64c15cbb9fd1ce6056fdb8bcb4b62"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.2.0/css/all.min.css" integrity="sha256-MVopmdyC2tYTiJ8wlktf0uh0v4NgT+vNdyVFepi7Q0c=" crossorigin="anonymous"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/academicons@1.9.5/css/academicons.min.css" integrity="sha256-SzrCOBJbGVFMahewkgjwnApaV2+av1DwMAA+/QGLyZw=" crossorigin="anonymous"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/scholar-icons@1.0.3/css/scholar-icons.css" integrity="sha256-VY3hHVj/hNX3fYG6wtbA6TcKJQl7+FthzGSyIB64klY=" crossorigin="anonymous"> <link defer rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700|Material+Icons&amp;display=swap"> <link defer rel="stylesheet" href="/assets/css/jekyll-pygments-themes-github.css?v=591dab5a4e56573bf4ef7fd332894c99" media="" id="highlight_theme_light"> <link rel="shortcut icon" href="data:image/svg+xml,&lt;svg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%20100%20100%22&gt;&lt;text%20y=%22.9em%22%20font-size=%2290%22&gt;%F0%9F%9B%A0%EF%B8%8F&lt;/text&gt;&lt;/svg&gt;"> <link rel="stylesheet" href="/assets/css/main.css?v=f0b101217084a90093badfe99ff9a7d1"> <link rel="canonical" href="https://alexjin520.github.io/blog/2026/crossing-thread-boundaries-in-libevent/"> <script src="/assets/js/theme.js?v=7af685e2ba20b37fef545c97b8064050"></script> <link defer rel="stylesheet" href="/assets/css/jekyll-pygments-themes-native.css?v=5847e5ed4a4568527aa6cfab446049ca" media="none" id="highlight_theme_dark"> <script>
+    initTheme();
+  </script> </head> <body class="fixed-top-nav "> <header> <nav id="navbar" class="navbar navbar-light navbar-expand-sm fixed-top" role="navigation"> <div class="container"> <a class="navbar-brand title font-weight-lighter" href="/"> Alex Jin </a> <button class="navbar-toggler collapsed navbar-toggler-main" type="button" data-nav-toggle="navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation"> <span class="sr-only">Toggle navigation</span> <span class="icon-bar top-bar"></span> <span class="icon-bar middle-bar"></span> <span class="icon-bar bottom-bar"></span> </button> <div class="collapse navbar-collapse navbar-collapse-main" id="navbarNav"> <ul class="navbar-nav navbar-menu-list flex-nowrap"> <li class="nav-item "> <a class="nav-link" href="/">about </a> </li> <li class="nav-item active"> <a class="nav-link" href="/blog/">blog </a> </li> <li class="nav-item "> <a class="nav-link" href="/projects/">projects </a> </li> <li class="nav-item"> <button id="search-toggle" type="button" title="Search" aria-label="Open search"> <span class="nav-link">ctrl k <i class="fa-solid fa-magnifying-glass"></i></span> </button> </li> <li class="toggle-container"> <button id="light-toggle" type="button" title="Change theme" aria-label="Change color theme"> <i class="fa-half-sun-moon" id="light-toggle-system"></i> <i class="fa-solid fa-moon" id="light-toggle-dark"></i> <i class="fa-solid fa-sun" id="light-toggle-light"></i> </button> </li> </ul> </div> </div> </nav> <progress id="progress" value="0"> <div class="progress-container"> <span class="progress-bar"></span> </div> </progress> </header> <div class="container mt-5" role="main"> <div class="post"> <header class="post-header"> <h1 class="post-title">Crossing Thread Boundaries Safely in libevent</h1> <p class="post-meta"> Created on July 23, 2026 </p> <p class="post-tags"> <a href="/blog/2026"> <i class="fa-solid fa-calendar fa-sm"></i> 2026 </a>   ·   <a href="/blog/tag/linux"> <i class="fa-solid fa-hashtag fa-sm"></i> Linux</a>   <a href="/blog/tag/libevent"> <i class="fa-solid fa-hashtag fa-sm"></i> libevent</a>   <a href="/blog/tag/bluetooth"> <i class="fa-solid fa-hashtag fa-sm"></i> Bluetooth</a>   <a href="/blog/tag/embedded-systems"> <i class="fa-solid fa-hashtag fa-sm"></i> Embedded Systems</a>   ·   <a href="/blog/category/technical-notes"> <i class="fa-solid fa-tag fa-sm"></i> Technical Notes</a> </p> </header> <article class="post-content"> <div id="markdown-content"> <p>In my previous article, I described the basic event-loop model: register file descriptors, keep callbacks short, and let the kernel wake the application when work is ready.</p> <p>That model becomes more interesting when a library already owns another thread and another main loop.</p> <p>I encountered exactly this problem while integrating a Bluetooth GATT server into an embedded fNIRS acquisition program. The application used <strong>libevent</strong> for CAN, UART, timers, and sampling state machines, while the GATT server used the <strong>BlueZ</strong> mainloop in a separate thread.</p> <p>Both sides needed to access the same device state:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>GATT thread                              libevent main thread
 -----------                              --------------------
 receives a phone command                 owns CAN communication
 parses the GATT payload                  owns sampling state
@@ -135,132 +141,105 @@ main loop performs the operation
         |
 GATT notification reports completion
 </code></pre></div></div> <p>That design changes the phone protocol and introduces request tracking, cancellation, and reconnect behavior. The extra complexity is worthwhile only when the product requirements need it.</p> <h2 id="10-general-rules-i-would-reuse">10. General rules I would reuse</h2> <p>The implementation is specific to an embedded Bluetooth application, but the design rules apply more broadly:</p> <ol> <li>Give mutable state a clear owner thread.</li> <li>Send commands to the owner instead of sharing direct access.</li> <li>Copy request data whose original lifetime is uncertain.</li> <li>Hold the queue mutex only while changing the queue.</li> <li>Use a file descriptor to wake a file-descriptor-based event loop.</li> <li>Give each synchronous request an explicit response channel.</li> <li>Bound every cross-thread wait with a timeout.</li> <li>Define cancellation, late completion, and shutdown behavior.</li> <li>Verify callback thread identity during development.</li> <li>Do not hide blocking work inside an event-loop callback.</li> <li>If a nested pump is unavoidable, service the real I/O source, not only the business state above it.</li> <li>Describe hybrid designs honestly: safe dispatch and full asynchrony are not the same thing.</li> </ol> <h2 id="conclusion">Conclusion</h2> <p>Connecting two event systems is less about finding one magical API and more about preserving ownership.</p> <p>In this design, BlueZ owns the GATT thread, libevent owns the fNIRS business state, a protected queue transfers commands, <code class="language-plaintext highlighter-rouge">eventfd</code> wakes the owner, and <code class="language-plaintext highlighter-rouge">socketpair</code> carries each result back. The components are ordinary Linux primitives, but together they create a clear boundary between two concurrency domains.</p> <p>The most valuable outcome was not simply reducing data races. The request path became observable and explainable:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>receive -&gt; enqueue -&gt; wake -&gt; execute -&gt; respond
-</code></pre></div></div> <p>When concurrency has a visible path and every piece of state has an owner, embedded software becomes much easier to reason about.</p>]]></content><author><name></name></author><category term="Technical Notes"/><category term="Linux"/><category term="libevent"/><category term="Bluetooth"/><category term="Embedded Systems"/><summary type="html"><![CDATA[How I connected a BlueZ GATT thread to a libevent main loop using an eventfd, a protected job queue, and a socketpair response channel.]]></summary></entry><entry><title type="html">Understanding Event-Driven I/O with libevent and libuv</title><link href="https://alexjin520.github.io/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/" rel="alternate" type="text/html" title="Understanding Event-Driven I/O with libevent and libuv"/><published>2026-07-23T06:00:00+00:00</published><updated>2026-07-23T06:00:00+00:00</updated><id>https://alexjin520.github.io/blog/2026/understanding-event-driven-io-with-libevent-and-libuv</id><content type="html" xml:base="https://alexjin520.github.io/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/"><![CDATA[<p>Over the past few days, I have been learning how <strong>libevent</strong> and <strong>libuv</strong> organize asynchronous I/O. The individual APIs are not the hardest part. The real challenge is building the right mental model:</p> <ul> <li>What exactly is a file descriptor?</li> <li>What does “non-blocking” mean?</li> <li>If an event loop has only one thread, how can it handle several devices?</li> <li>When multiple events arrive together, which callback runs?</li> <li>If threads can run in parallel, why use a single-threaded event loop at all?</li> </ul> <p>This article records the answers that finally made the model clear to me.</p> <h2 id="1-start-with-file-descriptors">1. Start with file descriptors</h2> <p>On Linux, a <strong>file descriptor</strong>, usually abbreviated as <strong>fd</strong>, is a small integer that identifies an open resource inside a process.</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>fd 0  -&gt; standard input
-fd 1  -&gt; standard output
-fd 2  -&gt; standard error
-fd 4  -&gt; a CAN socket
-fd 5  -&gt; a UART device
-fd 6  -&gt; a listening socket
-</code></pre></div></div> <p>The descriptor is not the resource itself. It is a handle that the process uses when asking the kernel to operate on that resource:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
-<span class="n">write</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">length</span><span class="p">);</span>
-<span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>
-</code></pre></div></div> <p>This common interface is important because an event library can monitor many different resources in the same way. A TCP socket, a CAN socket, a pipe, a <code class="language-plaintext highlighter-rouge">timerfd</code>, and some device files can all participate in one event loop.</p> <h2 id="2-why-blocking-io-becomes-a-problem">2. Why blocking I/O becomes a problem</h2> <p>Consider a normal blocking read:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">read</span><span class="p">(</span><span class="n">can_fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>
-</code></pre></div></div> <p>If no CAN frame is available, the calling thread waits. While it is waiting, that thread cannot process a UART message, a Bluetooth request, or an expired timer.</p> <p>A naive program might try to check every source repeatedly:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">while</span> <span class="p">(</span><span class="n">running</span><span class="p">)</span> <span class="p">{</span>
-    <span class="n">check_can</span><span class="p">();</span>
-    <span class="n">check_uart</span><span class="p">();</span>
-    <span class="n">check_bluetooth</span><span class="p">();</span>
-    <span class="n">check_timers</span><span class="p">();</span>
-<span class="p">}</span>
-</code></pre></div></div> <p>This is polling. It can waste CPU time when nothing is happening, and it becomes awkward as the number of event sources grows.</p> <p>Linux provides a better mechanism through facilities such as <code class="language-plaintext highlighter-rouge">epoll</code>: the application tells the kernel which descriptors it is interested in, and the kernel reports which ones are ready.</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CAN fd  -----\
-UART fd ------&gt; kernel waits for readiness ---&gt; event loop wakes up
-GATT fd -----/
-timerfd -----/
-</code></pre></div></div> <p>The application does not wait on one device at a time. The kernel waits on all registered sources together.</p> <h2 id="3-the-event-loop-model">3. The event loop model</h2> <p>At a high level, an event loop behaves like this:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>while the application is running:
-    wait until one or more events are ready
-    mark those events as active
-    call the callback associated with each active event
-</code></pre></div></div> <p>With libevent, a read event may be registered like this:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">struct</span> <span class="n">event</span> <span class="o">*</span><span class="n">can_event</span> <span class="o">=</span> <span class="n">event_new</span><span class="p">(</span>
-    <span class="n">base</span><span class="p">,</span>
-    <span class="n">can_fd</span><span class="p">,</span>
-    <span class="n">EV_READ</span> <span class="o">|</span> <span class="n">EV_PERSIST</span><span class="p">,</span>
-    <span class="n">can_read_callback</span><span class="p">,</span>
-    <span class="n">context</span>
-<span class="p">);</span>
+</code></pre></div></div> <p>When concurrency has a visible path and every piece of state has an owner, embedded software becomes much easier to reason about.</p> </div> </article> <br> <hr> <br> <h2 class="text-3xl font-semibold mb-4 mt-12">Enjoy Reading This Article?</h2> <p class="mb-2">Here are some more articles you might like to read next:</p> <ul class="list-disc pl-7 my-3 space-y-2 marker:text-[var(--global-theme-color)]"> <li class="leading-relaxed"> <a class="underline decoration-1 hover:text-[var(--global-hover-color)]" href="/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/">Understanding Event-Driven I/O with libevent and libuv</a> </li> </ul> </div> </div> <footer class="fixed-bottom" role="contentinfo"> <div class="container mt-0"> © Copyright 2026 Alex Jin. Powered by <a href="https://jekyllrb.com/" target="_blank" rel="external nofollow noopener">Jekyll</a> with <a href="https://github.com/alshedivat/al-folio" rel="external nofollow noopener" target="_blank">al-folio</a> theme. Hosted by <a href="https://pages.github.com/" target="_blank" rel="external nofollow noopener">GitHub Pages</a>. </div> </footer> <script>
+  window.alFolio = {
+    compatBootstrap: false
+  };
+</script> <script src="/assets/js/nav-toggle.js?v=141bd79a73ebc0f0b6ea58e440ae79fc"></script> <script defer src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js" integrity="sha256-Nn1q/fx0H7SNLZMQ5Hw5JLaTRZp0yILA/FRexe19VdI=" crossorigin="anonymous"></script> <script defer src="https://cdn.jsdelivr.net/npm/imagesloaded@5.0.0/imagesloaded.pkgd.min.js" integrity="sha256-htrLFfZJ6v5udOG+3kNLINIKh2gvoKqwEhHYfTTMICc=" crossorigin="anonymous"></script> <script defer src="/assets/js/masonry.js?v=e49affc7bd2646f6acdad1dbe02c2359" type="text/javascript"></script> <script defer type="text/javascript" id="MathJax-script" src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js" integrity="sha256-MASABpB4tYktI2Oitl4t+78w/lyA+D7b/s9GEP0JOGI=" crossorigin="anonymous"></script> <script src="/assets/al_math/js/mathjax-setup.js"></script> <script defer src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6" crossorigin="anonymous"></script> <script src="/assets/js/tooltips-setup.js?v=fe487e99db6c43751e6e7bdb2d6a0611"></script> <script src="/assets/js/no_defer.js?v=53b1b1a645525975c963ce8bf8bfefcf"></script> <script defer src="/assets/js/common.js?v=87baac90f765f2f3362dcf6aaf312a8a"></script> <script defer src="/assets/js/copy_code.js?v=c8a01c11a92744d44b093fc3bda915df" type="text/javascript"></script> <script defer src="/assets/js/jupyter_new_tab.js?v=896d254890d9b47f0281f63bfccf0dee"></script> <script async src="https://d1bxh8uas1mnw7.cloudfront.net/assets/embed.js"></script> <script async src="https://badge.dimensions.ai/badge.js"></script> <script defer src="https://cdn.jsdelivr.net/npm/medium-zoom@1.1.0/dist/medium-zoom.min.js" integrity="sha256-ZgMyDAIYDYGxbcpJcfUnYwNevG/xi9OHKaR/8GK+jWc=" crossorigin="anonymous"></script> <script defer src="/assets/al_img_tools/js/zoom.js"></script> <script defer src="/assets/js/progress-bar.js?v=499464c5c63ced6cf7ad62509f1e2610" type="text/javascript"></script> <script src="https://cdn.jsdelivr.net/npm/vanilla-back-to-top@7.2.1/dist/vanilla-back-to-top.min.js" integrity="sha256-uMJJ3EoTyfRBoTbR+lrfu1uRQ87RZG8AR3cVNuQVeFg=" crossorigin="anonymous"></script> <script>
+    addBackToTop();
+  </script> <script type="module" src="/assets/al_search/js/search/ninja-keys.min.js"></script> <ninja-keys hidebreadcrumbs noautoloadmdicons placeholder="Type to start searching"></ninja-keys> <script src="/assets/al_search/js/search-setup.js"></script> <script>
+// get the ninja-keys element
+const ninja = document.querySelector('ninja-keys');
 
-<span class="n">event_add</span><span class="p">(</span><span class="n">can_event</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
-</code></pre></div></div> <p>This says:</p> <blockquote> <p>Monitor <code class="language-plaintext highlighter-rouge">can_fd</code>. Whenever it becomes readable, call <code class="language-plaintext highlighter-rouge">can_read_callback</code>.</p> </blockquote> <p>libuv expresses the same general architecture with different types and APIs. Both libraries connect operating-system event notification to application callbacks.</p> <h2 id="4-what-happens-when-several-events-arrive">4. What happens when several events arrive?</h2> <p>Suppose the application has registered three callbacks:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CAN fd  ready -&gt; can_callback()
-UART fd ready -&gt; uart_callback()
-GATT fd ready -&gt; gatt_callback()
-</code></pre></div></div> <p>If all three descriptors become ready, the event loop activates all three events. In a single-threaded loop, the callbacks are normally executed one after another:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>can_callback()
-uart_callback()
-gatt_callback()
-</code></pre></div></div> <p>The order may vary unless explicit priorities are configured, so application correctness should not depend on an accidental ordering between events of equal priority.</p> <p>Sequential execution is not the same as blocking. A callback that processes already-available data and returns quickly is simply taking its turn. Blocking occurs when the callback waits for something that has not happened yet.</p> <p>For example, this is dangerous:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">void</span> <span class="nf">can_callback</span><span class="p">(</span><span class="kt">int</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">short</span> <span class="n">events</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">)</span>
-<span class="p">{</span>
-    <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>  <span class="cm">/* current frame */</span>
-    <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>  <span class="cm">/* may wait for a future frame */</span>
-<span class="p">}</span>
-</code></pre></div></div> <p>A common non-blocking pattern is to drain the data that is already available and stop when the kernel reports <code class="language-plaintext highlighter-rouge">EAGAIN</code>:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">static</span> <span class="kt">void</span> <span class="nf">can_callback</span><span class="p">(</span><span class="kt">int</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">short</span> <span class="n">events</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">)</span>
-<span class="p">{</span>
-    <span class="k">for</span> <span class="p">(;;)</span> <span class="p">{</span>
-        <span class="kt">ssize_t</span> <span class="n">n</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buffer</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buffer</span><span class="p">));</span>
+// add the home and posts menu items
+ninja.data = [{
+    id: "nav-about",
+    title: "about",
+    section: "Navigation",
+    handler: () => {
+      window.location.href = "/";
+    },
+  },{id: "nav-blog",
+          title: "blog",
+          description: "",
+          section: "Navigation",
+          handler: () => {
+            window.location.href = "/blog/";
+          },
+        },{id: "nav-projects",
+          title: "projects",
+          description: "A collection of projects I build, maintain, and explore.",
+          section: "Navigation",
+          handler: () => {
+            window.location.href = "/projects/";
+          },
+        },{id: "post-crossing-thread-boundaries-safely-in-libevent",
+        
+          title: "Crossing Thread Boundaries Safely in libevent",
+        
+        description: "How I connected a BlueZ GATT thread to a libevent main loop using an eventfd, a protected job queue, and a socketpair response channel.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/crossing-thread-boundaries-in-libevent/";
+          
+        },
+      },{id: "post-understanding-event-driven-i-o-with-libevent-and-libuv",
+        
+          title: "Understanding Event-Driven I/O with libevent and libuv",
+        
+        description: "What I learned about file descriptors, non-blocking I/O, event loops, callbacks, and the boundary between event-driven code and threads.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/";
+          
+        },
+      },{id: "projects-github-projects",
+          title: 'GitHub Projects',
+          description: "Explore the open-source projects I build and maintain.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/github/";
+            },},{
+        id: 'social-github',
+        title: 'GitHub',
+        section: 'Socials',
+        handler: () => {
+          window.open("https://github.com/alexjin520", "_blank");
+        },
+      },{
+        id: 'social-rss',
+        title: 'RSS Feed',
+        section: 'Socials',
+        handler: () => {
+          window.open("/feed.xml", "_blank");
+        },
+      },{
+      id: 'light-theme',
+      title: 'Change theme to light',
+      description: 'Change the theme of the site to Light',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("light");
+      },
+    },
+    {
+      id: 'dark-theme',
+      title: 'Change theme to dark',
+      description: 'Change the theme of the site to Dark',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("dark");
+      },
+    },
+    {
+      id: 'system-theme',
+      title: 'Use system default theme',
+      description: 'Change the theme of the site to System Default',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("system");
+      },
+    },];
 
-        <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
-            <span class="n">process_frame</span><span class="p">(</span><span class="n">buffer</span><span class="p">,</span> <span class="n">n</span><span class="p">);</span>
-            <span class="k">continue</span><span class="p">;</span>
-        <span class="p">}</span>
-
-        <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">&lt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="n">errno</span> <span class="o">==</span> <span class="n">EAGAIN</span> <span class="o">||</span> <span class="n">errno</span> <span class="o">==</span> <span class="n">EWOULDBLOCK</span><span class="p">))</span>
-            <span class="k">break</span><span class="p">;</span>
-
-        <span class="k">break</span><span class="p">;</span>
-    <span class="p">}</span>
-<span class="p">}</span>
-</code></pre></div></div> <p>The callback then returns control to the event loop so that other ready events can run.</p> <h2 id="5-asynchronous-and-non-blocking-are-related-but-different">5. Asynchronous and non-blocking are related, but different</h2> <p>These two terms are often used together:</p> <ul> <li><strong>Non-blocking</strong> describes an operation that returns immediately when it cannot make progress.</li> <li><strong>Asynchronous</strong> describes a control flow in which work is started now and its completion is handled later.</li> </ul> <p>For example:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>register interest in a socket
-        |
-        v
-continue handling other work
-        |
-        v
-kernel reports that the socket is readable
-        |
-        v
-event loop invokes the read callback
-</code></pre></div></div> <p>The application expresses interest at one point in time and receives the result later through a callback. No thread has to remain blocked on that socket.</p> <h2 id="6-a-practical-embedded-example-can-and-sampling">6. A practical embedded example: CAN and sampling</h2> <p>This model became much clearer when I applied it to an embedded acquisition system containing CAN, UART, Bluetooth GATT, and a sampling state machine.</p> <p>The design has two important event sources:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>CAN fd readable event  -&gt; receive and parse CAN frames
-1 ms timer event       -&gt; advance the sampling state machine
-</code></pre></div></div> <p>Sampling is not implemented as one long blocking function. Instead, it is split into small phases:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>configure an LED over CAN
-        |
-wait until a deadline, without sleeping
-        |
-send a sampling command
-        |
-request data from a node
-        |
-return to the event loop
-        |
-CAN response arrives and activates the CAN callback
-        |
-store the response and mark the node as ready
-        |
-a later timer tick advances the state machine
-</code></pre></div></div> <p>The key point is that CAN reception and sampling are not two large tasks where one must finish completely before the other begins. They cooperate:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sampling tick sends a CAN request
-CAN callback receives the response
-next sampling tick observes the response
-sampling state machine continues
-</code></pre></div></div> <p>Waiting is represented as state plus a deadline, not as <code class="language-plaintext highlighter-rouge">sleep()</code>:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">state</span><span class="o">-&gt;</span><span class="n">deadline_ms</span> <span class="o">=</span> <span class="n">now_ms</span> <span class="o">+</span> <span class="mi">3</span><span class="p">;</span>
-<span class="n">state</span><span class="o">-&gt;</span><span class="n">phase</span> <span class="o">=</span> <span class="n">WAIT_FOR_LED</span><span class="p">;</span>
-<span class="k">return</span><span class="p">;</span>
-</code></pre></div></div> <p>On later timer ticks:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">if</span> <span class="p">(</span><span class="n">now_ms</span> <span class="o">&lt;</span> <span class="n">state</span><span class="o">-&gt;</span><span class="n">deadline_ms</span><span class="p">)</span>
-    <span class="k">return</span><span class="p">;</span>
-
-<span class="n">state</span><span class="o">-&gt;</span><span class="n">phase</span> <span class="o">=</span> <span class="n">START_ADC</span><span class="p">;</span>
-</code></pre></div></div> <p>During those three milliseconds, the main thread remains free to process CAN, UART, GATT, and other timers.</p> <h2 id="7-why-a-single-threaded-loop-is-still-useful">7. Why a single-threaded loop is still useful</h2> <p>At first, a single-threaded event loop can look inferior to multiple threads. Multiple threads can run on several CPU cores, while callbacks on one loop execute sequentially.</p> <p>The missing detail is that I/O-driven programs usually spend much more time waiting than computing. The event loop lets the kernel wait for many I/O sources simultaneously, then performs only the short amount of work required for each ready event.</p> <p>A single-threaded event loop provides several useful properties:</p> <ul> <li>Shared state is naturally serialized.</li> <li>Callback ordering is easier to reason about.</li> <li>Fewer mutexes are required.</li> <li>Deadlocks and data races are less likely.</li> <li>Thread stacks and context switches are reduced.</li> <li>Startup and shutdown become simpler.</li> </ul> <p>In an embedded system, a Bluetooth command, a CAN response, and a sampling timer may all touch the same state. Running their small handlers on one thread often makes the system more deterministic than allowing three threads to modify that state concurrently.</p> <p>This does not mean that threads are bad. They are valuable for:</p> <ul> <li>CPU-intensive signal processing</li> <li>Compression or encryption</li> <li>Blocking APIs that cannot be converted to event-driven I/O</li> <li>Long-running work that would delay other callbacks</li> </ul> <p>The practical design is often hybrid:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>main event-loop thread
-├── CAN
-├── UART
-├── GATT
-├── timers
-└── state machines
-
-worker threads
-├── expensive calculations
-└── unavoidable blocking operations
-</code></pre></div></div> <p>The rule is simple: keep event-loop callbacks short, and move genuinely expensive or blocking work elsewhere.</p> <h2 id="8-how-worker-threads-notify-the-event-loop">8. How worker threads notify the event loop</h2> <p>A worker thread does not automatically become part of the main event loop. It needs a thread-safe notification mechanism.</p> <p>libuv provides <code class="language-plaintext highlighter-rouge">uv_async_send()</code> for this purpose:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>worker thread
-    |
-    | uv_async_send()
-    v
-main event loop wakes up
-    |
-    v
-async callback runs on the loop thread
-</code></pre></div></div> <p>With libevent on Linux, a similar mechanism can be built using an <code class="language-plaintext highlighter-rouge">eventfd</code>, pipe, or socket pair:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>worker thread
-    |
-    | enqueue result
-    | write(eventfd)
-    v
-eventfd becomes readable
-    |
-    v
-libevent invokes its callback on the main thread
-    |
-    v
-main thread consumes the queued result
-</code></pre></div></div> <p>The notification transfers control back to the event-loop thread. Shared data still needs a mutex, atomics, or a thread-safe queue.</p> <h2 id="9-libevent-and-libuv-the-common-idea">9. libevent and libuv: the common idea</h2> <p>libevent and libuv differ in API design and scope, but the central model is similar:</p> <table> <thead> <tr> <th>Concept</th> <th>libevent</th> <th>libuv</th> </tr> </thead> <tbody> <tr> <td>Event loop</td> <td><code class="language-plaintext highlighter-rouge">event_base</code></td> <td><code class="language-plaintext highlighter-rouge">uv_loop_t</code></td> </tr> <tr> <td>I/O readiness</td> <td><code class="language-plaintext highlighter-rouge">event_new()</code> and callbacks</td> <td>stream, poll, and handle callbacks</td> </tr> <tr> <td>Timers</td> <td>timer events</td> <td><code class="language-plaintext highlighter-rouge">uv_timer_t</code></td> </tr> <tr> <td>Cross-thread notification</td> <td>commonly <code class="language-plaintext highlighter-rouge">eventfd</code>, pipe, or <code class="language-plaintext highlighter-rouge">event_active()</code> with configured threading</td> <td><code class="language-plaintext highlighter-rouge">uv_async_t</code> and <code class="language-plaintext highlighter-rouge">uv_async_send()</code></td> </tr> <tr> <td>Worker execution</td> <td>application threads or external thread pools</td> <td><code class="language-plaintext highlighter-rouge">uv_queue_work()</code> and the libuv thread pool</td> </tr> </tbody> </table> <p>libuv offers a broader cross-platform abstraction for networking, files, processes, DNS, and threads. libevent focuses strongly on event notification, timers, and network-oriented building blocks. Choosing between them depends on the application, but understanding either one teaches the same fundamental lesson:</p> <blockquote> <p>Do not block while waiting for I/O. Register interest, return control to the loop, and react when the event becomes ready.</p> </blockquote> <h2 id="10-the-mental-model-i-will-keep">10. The mental model I will keep</h2> <p>My final mental model is:</p> <ol> <li>An fd is a process-local handle for a kernel resource.</li> <li>The kernel can monitor many fds at the same time.</li> <li>The event loop maps each ready fd or timer to a callback.</li> <li>Several active callbacks normally run sequentially on the loop thread.</li> <li>Sequential does not mean blocking.</li> <li>A callback blocks the loop only when it waits or performs excessive work.</li> <li>Long workflows should be split into short state-machine steps.</li> <li>Threads are useful for real parallel work, but they must notify the main loop explicitly.</li> </ol> <p>Once I stopped imagining the event loop as “one thread waiting on one device,” the architecture made sense. It is one thread coordinating many sources of readiness, while the operating system performs the waiting efficiently.</p>]]></content><author><name></name></author><category term="Technical Notes"/><category term="Linux"/><category term="Programming"/><category term="Embedded Systems"/><summary type="html"><![CDATA[What I learned about file descriptors, non-blocking I/O, event loops, callbacks, and the boundary between event-driven code and threads.]]></summary></entry></feed>
+</script> <script src="/assets/al_search/js/shortcut-key.js"></script> </body> </html>
