@@ -1,0 +1,52 @@
+---
+---
+
+@use "sass:math";
+@use "sass:string";
+
+@use "variables" with (
+  $max-content-width: 930px
+);
+
+@use "themes";
+@use "layout";
+@use "typography";
+@use "navbar";
+@use "footer";
+@use "blog";
+@use "publications";
+@use "components";
+@use "utilities";
+@use "tabs";
+@use "teachings";
+@use "typograms";
+
+body {
+  position: relative;
+  isolation: isolate;
+  background-color: transparent;
+}
+
+body::before {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.76), rgba(255, 255, 255, 0.76)),
+    url("/assets/img/site-background.webp") center / cover no-repeat;
+}
+
+html[data-theme="dark"] body::before {
+  background:
+    linear-gradient(rgba(10, 14, 20, 0.68), rgba(10, 14, 20, 0.68)),
+    url("/assets/img/site-background.webp") center / cover no-repeat;
+}
+
+@media (max-width: 768px) {
+  body::before,
+  html[data-theme="dark"] body::before {
+    background-position: 68% center;
+  }
+}
