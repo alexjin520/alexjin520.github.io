@@ -50,3 +50,23 @@ html[data-theme="dark"] body::before {
     background-position: 68% center;
   }
 }
+
+.project-flow {
+  margin: 2rem 0;
+}
+
+.project-flow img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--global-divider-color);
+  border-radius: 1rem;
+  background: #f7fafc;
+}
+
+.project-flow figcaption {
+  margin-top: 0.75rem;
+  color: var(--global-text-color-light);
+  font-size: 0.9rem;
+  text-align: center;
+}

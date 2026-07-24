@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">Embedded fNIRS acquisition system flow</title>
+  <desc id="desc">A phone sends a Bluetooth command to a BlueZ GATT thread. A protected queue and eventfd transfer the command into a libevent main loop, which coordinates a sampling state machine, CAN nodes, and UART peripherals. A socketpair returns the result to Bluetooth.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7fafc"/>
+      <stop offset="1" stop-color="#edf4f8"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#49657a"/>
+    </marker>
+    <marker id="arrow-accent" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <path d="M0 0 10 5 0 10Z" fill="#087e8b"/>
+    </marker>
+    <style>
+      .lane { fill: #fff; stroke: #c8d7e1; stroke-width: 2; }
+      .box { fill: #fff; stroke: #54748a; stroke-width: 2; }
+      .accent { fill: #e5f6f7; stroke: #087e8b; stroke-width: 2.5; }
+      .device { fill: #f2edff; stroke: #7057a8; stroke-width: 2; }
+      .label { font: 600 22px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #183142; }
+      .small { font: 17px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #496171; }
+      .lane-title { font: 700 18px system-ui, -apple-system, "Segoe UI", sans-serif; fill: #087e8b; letter-spacing: 1px; }
+      .line { fill: none; stroke: #49657a; stroke-width: 3; marker-end: url(#arrow); }
+      .accent-line { fill: none; stroke: #087e8b; stroke-width: 3; marker-end: url(#arrow-accent); }
+      .return-line { fill: none; stroke: #7057a8; stroke-width: 3; stroke-dasharray: 9 7; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect width="1200" height="720" rx="28" fill="url(#background)"/>
+
+  <rect class="lane" x="34" y="34" width="274" height="652" rx="22"/>
+  <rect class="lane" x="328" y="34" width="318" height="652" rx="22"/>
+  <rect class="lane" x="666" y="34" width="500" height="652" rx="22"/>
+
+  <text class="lane-title" x="58" y="72">CLIENT</text>
+  <text class="lane-title" x="352" y="72">BLUETOOTH THREAD</text>
+  <text class="lane-title" x="690" y="72">STATE-OWNING MAIN THREAD</text>
+
+  <rect class="device" x="70" y="126" width="202" height="104" rx="18"/>
+  <text class="label" x="171" y="169" text-anchor="middle">Phone / App</text>
+  <text class="small" x="171" y="200" text-anchor="middle">GATT command</text>
+
+  <rect class="box" x="370" y="126" width="234" height="104" rx="18"/>
+  <text class="label" x="487" y="168" text-anchor="middle">BlueZ GATT</text>
+  <text class="small" x="487" y="199" text-anchor="middle">decode + validate</text>
+
+  <path class="line" d="M272 178H370"/>
+
+  <rect class="accent" x="370" y="292" width="234" height="118" rx="18"/>
+  <text class="label" x="487" y="333" text-anchor="middle">Dispatch layer</text>
+  <text class="small" x="487" y="365" text-anchor="middle">protected job queue</text>
+  <text class="small" x="487" y="391" text-anchor="middle">+ eventfd wake-up</text>
+  <path class="accent-line" d="M487 230V292"/>
+
+  <rect class="accent" x="714" y="126" width="404" height="120" rx="18"/>
+  <text class="label" x="916" y="169" text-anchor="middle">libevent main loop</text>
+  <text class="small" x="916" y="201" text-anchor="middle">owns CAN, UART, timers, and device state</text>
+  <path class="accent-line" d="M604 351H660Q690 351 690 321V216Q690 186 714 186"/>
+
+  <rect class="box" x="714" y="316" width="250" height="116" rx="18"/>
+  <text class="label" x="839" y="358" text-anchor="middle">Sampling state</text>
+  <text class="small" x="839" y="389" text-anchor="middle">short timed phases</text>
+  <text class="small" x="839" y="415" text-anchor="middle">no blocking sleeps</text>
+  <path class="line" d="M839 246V316"/>
+
+  <rect class="device" x="1000" y="316" width="118" height="116" rx="18"/>
+  <text class="label" x="1059" y="358" text-anchor="middle">CAN</text>
+  <text class="small" x="1059" y="388" text-anchor="middle">12 nodes</text>
+  <text class="small" x="1059" y="414" text-anchor="middle">responses</text>
+  <path class="line" d="M964 374H1000"/>
+  <path class="return-line" d="M1059 432V478Q1059 502 1035 502H839V432"/>
+
+  <rect class="box" x="714" y="548" width="180" height="92" rx="18"/>
+  <text class="label" x="804" y="586" text-anchor="middle">UART</text>
+  <text class="small" x="804" y="615" text-anchor="middle">peripherals</text>
+  <path class="line" d="M916 246V516Q916 548 894 548"/>
+
+  <rect class="device" x="938" y="548" width="180" height="92" rx="18"/>
+  <text class="label" x="1028" y="586" text-anchor="middle">Result</text>
+  <text class="small" x="1028" y="615" text-anchor="middle">status + payload</text>
+  <path class="line" d="M916 246V516Q916 548 938 548"/>
+
+  <path class="return-line" d="M938 594H646Q620 594 620 568V505Q620 479 594 479H487V410"/>
+  <text class="small" x="695" y="580" text-anchor="middle">socketpair response</text>
+
+  <path class="return-line" d="M370 479H171Q143 479 143 451V230"/>
+  <text class="small" x="256" y="463" text-anchor="middle">GATT reply</text>
+</svg>

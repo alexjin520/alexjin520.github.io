@@ -2,7 +2,7 @@
 layout: page
 title: GitHub Projects
 description: Explore the open-source projects I build and maintain.
-importance: 1
+importance: 2
 category: open-source
 redirect: https://github.com/alexjin520
 ---
