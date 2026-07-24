@@ -1,0 +1,245 @@
+/*
+ * Site-wide visual polish, compiled through main.scss. It uses theme variables so
+ * every enhancement follows al-folio's light and dark color modes.
+ */
+
+:root {
+  --site-radius: 0.9rem;
+  --site-shadow: 0 12px 34px rgba(20, 32, 48, 0.08);
+  --site-shadow-hover: 0 18px 42px rgba(20, 32, 48, 0.14);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background:
+    radial-gradient(circle at 12% 5%, color-mix(in srgb, var(--global-theme-color) 7%, transparent), transparent 30rem),
+    radial-gradient(circle at 90% 22%, color-mix(in srgb, var(--global-theme-color) 4%, transparent), transparent 26rem), var(--global-bg-color);
+}
+
+::selection {
+  color: var(--global-hover-text-color);
+  background: var(--global-theme-color);
+}
+
+#navbar {
+  border-bottom: 1px solid color-mix(in srgb, var(--global-divider-color) 76%, transparent);
+  background: color-mix(in srgb, var(--global-bg-color) 88%, transparent);
+  box-shadow: 0 8px 28px rgba(20, 32, 48, 0.05);
+  backdrop-filter: blur(16px) saturate(140%);
+}
+
+#navbar .nav-link {
+  position: relative;
+  transition:
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+#navbar .nav-link:hover {
+  transform: translateY(-1px);
+}
+
+#navbar .nav-item > .nav-link::after {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.2rem;
+  left: 0.5rem;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--global-theme-color);
+  content: "";
+  transform: scaleX(0);
+  transform-origin: center;
+  transition: transform 180ms ease;
+}
+
+#navbar .nav-item.active > .nav-link::after,
+#navbar .nav-item > .nav-link:hover::after {
+  transform: scaleX(1);
+}
+
+body > .container[role="main"] {
+  animation: site-page-enter 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.post-header {
+  margin-bottom: 2rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--global-divider-color);
+}
+
+.post-header .post-title {
+  letter-spacing: -0.025em;
+}
+
+article a:not(.btn),
+.post a:not(.btn) {
+  text-underline-offset: 0.18em;
+  text-decoration-thickness: 0.08em;
+  transition:
+    color 160ms ease,
+    text-decoration-color 160ms ease;
+}
+
+.card,
+.projects .card,
+.post-list > li {
+  border: 1px solid var(--global-divider-color);
+  border-radius: var(--site-radius);
+  background: color-mix(in srgb, var(--global-card-bg-color) 94%, transparent);
+  box-shadow: var(--site-shadow);
+  transition:
+    border-color 200ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease;
+}
+
+.card:hover,
+.projects .card:hover,
+.post-list > li:hover {
+  border-color: color-mix(in srgb, var(--global-theme-color) 42%, var(--global-divider-color));
+  box-shadow: var(--site-shadow-hover);
+  transform: translateY(-3px);
+}
+
+.post-list > li {
+  margin-bottom: 1rem;
+  padding: 1.15rem 1.25rem;
+}
+
+.news table {
+  border-collapse: separate;
+  border-spacing: 0 0.55rem;
+}
+
+.news table tr {
+  background: color-mix(in srgb, var(--global-card-bg-color) 92%, transparent);
+  box-shadow: 0 8px 24px rgba(20, 32, 48, 0.05);
+  transition:
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.news table tr:hover {
+  box-shadow: var(--site-shadow);
+  transform: translateY(-2px);
+}
+
+.news table th,
+.news table td {
+  padding: 0.8rem 1rem;
+  vertical-align: middle;
+}
+
+.news table th:first-child {
+  border-radius: 0.75rem 0 0 0.75rem;
+}
+
+.news table td:last-child {
+  border-radius: 0 0.75rem 0.75rem 0;
+}
+
+pre,
+.highlight {
+  border: 1px solid var(--global-divider-color);
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 28px rgba(20, 32, 48, 0.06);
+}
+
+.highlight > pre.highlight {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+blockquote {
+  border-radius: 0 0.7rem 0.7rem 0;
+  background: color-mix(in srgb, var(--global-theme-color) 5%, transparent);
+}
+
+.social .contact-icons a {
+  display: inline-grid;
+  width: 3.25rem;
+  height: 3.25rem;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  place-items: center;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    transform 180ms ease;
+}
+
+.social .contact-icons a:hover {
+  border-color: var(--global-divider-color);
+  background: var(--global-card-bg-color);
+  transform: translateY(-3px);
+}
+
+@keyframes site-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@view-transition {
+  navigation: auto;
+}
+
+::view-transition-old(root) {
+  animation: 140ms ease both site-page-leave;
+}
+
+::view-transition-new(root) {
+  animation: 240ms ease both site-page-enter;
+}
+
+@keyframes site-page-leave {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 576px) {
+  :root {
+    --site-radius: 0.75rem;
+    --site-shadow: 0 8px 24px rgba(20, 32, 48, 0.07);
+  }
+
+  .post-header {
+    margin-bottom: 1.5rem;
+  }
+
+  .post-list > li {
+    padding: 1rem;
+  }
+
+  .news table th,
+  .news table td {
+    padding: 0.7rem 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
