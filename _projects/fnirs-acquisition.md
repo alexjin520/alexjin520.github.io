@@ -70,5 +70,6 @@ Bluetooth request a bounded response path.
 
 ## Related notes
 
+- [Designing Reliable Live Data Acquisition and File Synchronization over BLE]({% post_url 2026-07-28-designing-reliable-live-data-acquisition-and-file-synchronization-over-ble %})
 - [Understanding Event-Driven I/O with libevent and libuv]({% post_url 2026-07-23-understanding-event-driven-io-with-libevent-and-libuv %})
 - [Crossing Thread Boundaries Safely in libevent]({% post_url 2026-07-23-crossing-thread-boundaries-in-libevent %})
