@@ -119,7 +119,7 @@ Violating this invariant indicates a state-machine or bookkeeping bug, not a rad
 
 ## 4. Backpressure is unavoidable
 
-Suppose the recording grows at rate \(R_p\) and BLE delivers file data at net rate \(R_t\).
+Suppose the recording grows at rate $R_p$ and BLE delivers file data at net rate $R_t$.
 
 If:
 
@@ -137,17 +137,17 @@ R_t < R_p
 
 the unsent backlog must grow. No retry strategy or thread optimization can change that conservation law.
 
-After an acquisition lasting \(T\), the approximate backlog is:
+After an acquisition lasting $T$, the approximate backlog is:
 
-\[
+$$
 B \approx \max(0, R_p - R_t)T
-\]
+$$
 
 and the minimum drain time after Stop is:
 
-\[
-T\_{\text{drain}} \approx \frac{B}{R_t}
-\]
+$$
+T_{\text{drain}} \approx \frac{B}{R_t}
+$$
 
 Protocol overhead, retransmissions, connection intervals, and flash-read contention make the real time longer.
 
