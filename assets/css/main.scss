@@ -41,3 +41,106 @@
   font-size: 0.9rem;
   text-align: center;
 }
+
+.project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  margin: 1.5rem 0 2rem;
+}
+
+.project-action {
+  display: inline-flex;
+  min-height: 2.7rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.65rem 1rem;
+  border: 1px solid var(--global-divider-color);
+  border-radius: 999px;
+  background: var(--global-card-bg-color);
+  color: var(--global-theme-color);
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-decoration: none;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.project-action:hover {
+  border-color: var(--global-theme-color);
+  box-shadow: 0 8px 22px rgba(20, 32, 48, 0.1);
+  color: var(--global-theme-color);
+  text-decoration: none;
+  transform: translateY(-2px);
+}
+
+.project-action-primary {
+  border-color: var(--global-theme-color);
+  background: var(--global-theme-color);
+  color: var(--global-hover-text-color);
+}
+
+.project-action-primary:hover {
+  color: var(--global-hover-text-color);
+}
+
+.project-hero {
+  margin: 2rem 0;
+}
+
+.project-hero img,
+.project-gallery img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--global-divider-color);
+  border-radius: 0.9rem;
+  object-fit: cover;
+}
+
+.project-hero figcaption,
+.project-gallery figcaption {
+  margin-top: 0.65rem;
+  color: var(--global-text-color-light);
+  font-size: 0.88rem;
+  text-align: center;
+}
+
+.project-note {
+  display: block;
+  margin: 1.5rem 0 2rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--global-divider-color);
+  border-left: 3px solid var(--global-theme-color);
+  border-radius: 0 0.75rem 0.75rem 0;
+  background: color-mix(in srgb, var(--global-theme-color) 5%, transparent);
+}
+
+.project-gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin: 1.25rem 0 2rem;
+}
+
+.project-gallery figure {
+  margin: 0;
+}
+
+@media (max-width: 576px) {
+  .project-actions {
+    display: grid;
+  }
+
+  .project-action {
+    width: 100%;
+  }
+
+  .project-gallery {
+    grid-template-columns: 1fr;
+  }
+}
