@@ -1,0 +1,231 @@
+<!DOCTYPE html> <html lang="en"> <head> <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"> <meta charset="utf-8"> <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"> <meta http-equiv="X-UA-Compatible" content="IE=edge"> <title> Designing Reliable Live Data Acquisition and File Synchronization over BLE | Alex Jin </title> <meta name="author" content="Alex Jin"> <meta name="description" content="How I separated live waveform preview from lossless file delivery, tailed a growing recording, and made Stop mean drain and verify instead of disconnect."> <meta name="keywords" content="Alex Jin, software development, embedded systems, open source, technical blog"> <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' data: https:; media-src 'self' https:; frame-src 'self' https:; connect-src 'self' https:;"> <style>
+  :root {
+    --max-content-width: 930px;
+  }
+</style> <link rel="stylesheet" href="/assets/css/tailwind.css?v=50c64c15cbb9fd1ce6056fdb8bcb4b62"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.2.0/css/all.min.css" integrity="sha256-MVopmdyC2tYTiJ8wlktf0uh0v4NgT+vNdyVFepi7Q0c=" crossorigin="anonymous"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/academicons@1.9.5/css/academicons.min.css" integrity="sha256-SzrCOBJbGVFMahewkgjwnApaV2+av1DwMAA+/QGLyZw=" crossorigin="anonymous"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/scholar-icons@1.0.3/css/scholar-icons.css" integrity="sha256-VY3hHVj/hNX3fYG6wtbA6TcKJQl7+FthzGSyIB64klY=" crossorigin="anonymous"> <link defer rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700|Material+Icons&amp;display=swap"> <link defer rel="stylesheet" href="/assets/css/jekyll-pygments-themes-github.css?v=591dab5a4e56573bf4ef7fd332894c99" media="" id="highlight_theme_light"> <link rel="shortcut icon" href="data:image/svg+xml,&lt;svg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%20100%20100%22&gt;&lt;text%20y=%22.9em%22%20font-size=%2290%22&gt;%F0%9F%9B%A0%EF%B8%8F&lt;/text&gt;&lt;/svg&gt;"> <link rel="stylesheet" href="/assets/css/main.css?v=f0b101217084a90093badfe99ff9a7d1"> <link rel="canonical" href="https://alexjin520.github.io/blog/2026/designing-reliable-live-data-acquisition-and-file-synchronization-over-ble/"> <script src="/assets/js/theme.js?v=7af685e2ba20b37fef545c97b8064050"></script> <link defer rel="stylesheet" href="/assets/css/jekyll-pygments-themes-native.css?v=5847e5ed4a4568527aa6cfab446049ca" media="none" id="highlight_theme_dark"> <script>
+    initTheme();
+  </script> </head> <body class="fixed-top-nav "> <header> <nav id="navbar" class="navbar navbar-light navbar-expand-sm fixed-top" role="navigation"> <div class="container"> <a class="navbar-brand title font-weight-lighter" href="/"> Alex Jin </a> <button class="navbar-toggler collapsed navbar-toggler-main" type="button" data-nav-toggle="navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation"> <span class="sr-only">Toggle navigation</span> <span class="icon-bar top-bar"></span> <span class="icon-bar middle-bar"></span> <span class="icon-bar bottom-bar"></span> </button> <div class="collapse navbar-collapse navbar-collapse-main" id="navbarNav"> <ul class="navbar-nav navbar-menu-list flex-nowrap"> <li class="nav-item "> <a class="nav-link" href="/">about </a> </li> <li class="nav-item active"> <a class="nav-link" href="/blog/">blog </a> </li> <li class="nav-item "> <a class="nav-link" href="/projects/">projects </a> </li> <li class="nav-item"> <button id="search-toggle" type="button" title="Search" aria-label="Open search"> <span class="nav-link">ctrl k <i class="fa-solid fa-magnifying-glass"></i></span> </button> </li> <li class="toggle-container"> <button id="light-toggle" type="button" title="Change theme" aria-label="Change color theme"> <i class="fa-half-sun-moon" id="light-toggle-system"></i> <i class="fa-solid fa-moon" id="light-toggle-dark"></i> <i class="fa-solid fa-sun" id="light-toggle-light"></i> </button> </li> </ul> </div> </div> </nav> <progress id="progress" value="0"> <div class="progress-container"> <span class="progress-bar"></span> </div> </progress> </header> <div class="container mt-5" role="main"> <div class="post"> <header class="post-header"> <h1 class="post-title">Designing Reliable Live Data Acquisition and File Synchronization over BLE</h1> <p class="post-meta"> Created on July 28, 2026 </p> <p class="post-tags"> <a href="/blog/2026"> <i class="fa-solid fa-calendar fa-sm"></i> 2026 </a>   ·   <a href="/blog/tag/bluetooth-low-energy"> <i class="fa-solid fa-hashtag fa-sm"></i> Bluetooth Low Energy</a>   <a href="/blog/tag/embedded-linux"> <i class="fa-solid fa-hashtag fa-sm"></i> Embedded Linux</a>   <a href="/blog/tag/data-integrity"> <i class="fa-solid fa-hashtag fa-sm"></i> Data Integrity</a>   <a href="/blog/tag/systems-design"> <i class="fa-solid fa-hashtag fa-sm"></i> Systems Design</a>   ·   <a href="/blog/category/technical-notes"> <i class="fa-solid fa-tag fa-sm"></i> Technical Notes</a> </p> </header> <article class="post-content"> <div id="markdown-content"> <p>I recently worked on an embedded physiological-sensing system with a deceptively simple requirement:</p> <blockquote> <p>Show live waveforms on a phone while recording, download the complete recording at the same time, and deliver whatever remains after the user presses Stop.</p> </blockquote> <p>The device already supported the two endpoints independently. It could stream samples for a live chart, and it could generate a binary file and transfer that file later. Combining them changed the problem.</p> <p>The file was no longer static while it was being downloaded. The producer could append data faster than BLE could transmit it, and stopping acquisition did not mean that the consumer had received the end of the file. A correct design therefore had to coordinate three timelines:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>sensor acquisition:  produces new samples
+file writer:          appends encoded records
+BLE synchronizer:     sends and acknowledges file bytes
+</code></pre></div></div> <p>This article explains the mental model and protocol that made the system reliable.</p> <h2 id="1-live-preview-and-complete-delivery-are-different-products">1. Live preview and complete delivery are different products</h2> <p>It is tempting to treat every byte sent over BLE as one stream, but a live waveform and a complete recording have different contracts.</p> <p>A <strong>live preview</strong> is optimized for immediacy:</p> <ul> <li>New samples matter more than old samples.</li> <li>A bounded queue is necessary.</li> <li>Downsampling or compact encoding may be acceptable.</li> <li>If the phone falls behind, dropping stale preview data can be better than increasing latency forever.</li> </ul> <p>A <strong>recording transfer</strong> is optimized for completeness:</p> <ul> <li>Every byte must arrive in order.</li> <li>Missing data must be retransmitted.</li> <li>Progress must survive temporary stalls or reconnects.</li> <li>Completion must be verified against a stable final file.</li> </ul> <p>These paths may share a BLE connection, but they should not share semantics.</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>                         ┌─&gt; live preview queue ─&gt; waveform notifications
+sensor nodes ─&gt; acquire ─┤
+                         └─&gt; append-only file ──&gt; file synchronization
+</code></pre></div></div> <p>The live path answers, “What is happening now?” The file path answers, “Can I reconstruct the entire session exactly?”</p> <h2 id="2-a-growing-file-does-not-have-a-normal-eof">2. A growing file does not have a normal EOF</h2> <p>Downloading a completed file is straightforward:</p> <ol> <li>Read its size.</li> <li>Send chunks until the offset reaches that size.</li> <li>Verify the result.</li> </ol> <p>A growing file breaks the first assumption. Reaching the current end of the file only means that the reader has caught up <strong>for now</strong>. More data may appear on the next acquisition cycle.</p> <p>The transfer loop therefore needs to distinguish two cases:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>reader offset == currently available bytes
+    + writer still active   -&gt; wait for growth and continue
+    + writer finalized      -&gt; this is the real end of the file
+</code></pre></div></div> <p>I modeled the file as an append-only log. The writer owns the production offset, while the synchronizer owns the acknowledged offset:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>0                                                        produced_offset
+|================ acknowledged ================|---- pending ----|
+                                                ^
+                                                acknowledged_offset
+</code></pre></div></div> <p>The sender never needs to load the entire recording into memory. It reads a bounded chunk from the acknowledged or next-send offset, transmits it, and retains only enough state to retry unacknowledged data.</p> <p>If buffered standard I/O is used, the writer must flush application buffers before expecting another file descriptor to observe newly appended bytes. <code class="language-plaintext highlighter-rouge">fsync()</code> is a separate durability decision: it protects against storage or power failure, but it should not be confused with protocol-level delivery.</p> <h2 id="3-use-offsets-as-the-source-of-truth">3. Use offsets as the source of truth</h2> <p>Packets can be duplicated, delayed, or lost. A transfer protocol becomes much easier to reason about when progress is represented by a byte offset rather than by a count of packets sent.</p> <p>A data message can contain:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>session_id | file_offset | payload_length | payload
+</code></pre></div></div> <p>The phone responds with a cumulative acknowledgment:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>ACK next_expected_offset
+</code></pre></div></div> <p>If the phone acknowledges offset <code class="language-plaintext highlighter-rouge">65536</code>, it is confirming that every byte before <code class="language-plaintext highlighter-rouge">65536</code> is present. The device can discard any buffered chunks fully below that offset.</p> <p>Cumulative acknowledgments provide useful properties:</p> <ul> <li>Repeating a chunk is harmless.</li> <li>Repeating an ACK is harmless.</li> <li>Lost ACKs do not corrupt progress.</li> <li>Reconnection can resume from a confirmed offset.</li> <li>Logs describe transfer state in bytes, independent of BLE packet sizing.</li> </ul> <p>The key invariant is:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>0 &lt;= acknowledged_offset &lt;= sent_offset &lt;= produced_offset
+</code></pre></div></div> <p>Violating this invariant indicates a state-machine or bookkeeping bug, not a radio-quality problem.</p> <h2 id="4-backpressure-is-unavoidable">4. Backpressure is unavoidable</h2> <p>Suppose the recording grows at rate (R_p) and BLE delivers file data at net rate (R_t).</p> <p>If:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>R_t &gt;= R_p
+</code></pre></div></div> <p>the synchronizer can eventually catch up while acquisition is still active.</p> <p>If:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>R_t &lt; R_p
+</code></pre></div></div> <p>the unsent backlog must grow. No retry strategy or thread optimization can change that conservation law.</p> <p>After an acquisition lasting (T), the approximate backlog is:</p> <p>[ B \approx \max(0, R_p - R_t)T ]</p> <p>and the minimum drain time after Stop is:</p> <p>[ T_{\text{drain}} \approx \frac{B}{R_t} ]</p> <p>Protocol overhead, retransmissions, connection intervals, and flash-read contention make the real time longer.</p> <p>This observation changed the user-interface contract. “Stop acquisition” can happen immediately, but “file synchronization complete” may happen later. Those are separate events and should be displayed separately.</p> <p>It also suggests several engineering choices:</p> <ul> <li>Keep preview traffic bounded so it cannot starve file transfer.</li> <li>Reduce redundant fields in the on-disk format.</li> <li>Batch payloads up to an effective BLE chunk size.</li> <li>Avoid per-packet logging on the critical path.</li> <li>Report both acquisition state and synchronization progress to the phone.</li> </ul> <h2 id="5-stop-is-a-transition-not-global-cleanup">5. Stop is a transition, not global cleanup</h2> <p>The first failing design treated Stop as the end of the whole session:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Stop pressed
+    -&gt; stop sensors
+    -&gt; close the file
+    -&gt; cancel transfer callbacks
+    -&gt; release BLE/session state
+</code></pre></div></div> <p>That sequence is attractive because it looks like simple cleanup. It is also wrong when file delivery is still active.</p> <p>The acquisition producer should stop first, but the transfer consumer must remain alive until it has drained the finalized tail. I separated the lifecycle into explicit states:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>IDLE
+  |
+  v
+COLLECTING_AND_SYNCING
+  |
+  | Stop requested
+  v
+STOPPING_PRODUCER
+  |
+  | writer flushed and final size captured
+  v
+DRAINING_TAIL
+  |
+  | acknowledged_offset == final_size
+  v
+VERIFYING
+  |
+  | size and CRC32 match
+  v
+COMPLETE
+</code></pre></div></div> <p>The important boundary is between <code class="language-plaintext highlighter-rouge">STOPPING_PRODUCER</code> and <code class="language-plaintext highlighter-rouge">DRAINING_TAIL</code>. Only after the writer has finished appending can the system capture a stable <code class="language-plaintext highlighter-rouge">final_size</code> and final CRC32.</p> <p>In simplified pseudocode:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">void</span> <span class="nf">on_stop_requested</span><span class="p">(</span><span class="k">struct</span> <span class="n">session</span> <span class="o">*</span><span class="n">s</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">s</span><span class="o">-&gt;</span><span class="n">acquisition_state</span> <span class="o">=</span> <span class="n">ACQUISITION_STOPPING</span><span class="p">;</span>
+    <span class="n">stop_sensor_requests_async</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="nf">on_writer_finalized</span><span class="p">(</span><span class="k">struct</span> <span class="n">session</span> <span class="o">*</span><span class="n">s</span><span class="p">,</span>
+                         <span class="kt">uint64_t</span> <span class="n">final_size</span><span class="p">,</span>
+                         <span class="kt">uint32_t</span> <span class="n">final_crc32</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">s</span><span class="o">-&gt;</span><span class="n">final_size</span> <span class="o">=</span> <span class="n">final_size</span><span class="p">;</span>
+    <span class="n">s</span><span class="o">-&gt;</span><span class="n">final_crc32</span> <span class="o">=</span> <span class="n">final_crc32</span><span class="p">;</span>
+    <span class="n">s</span><span class="o">-&gt;</span><span class="n">transfer_state</span> <span class="o">=</span> <span class="n">TRANSFER_DRAINING</span><span class="p">;</span>
+    <span class="n">pump_transfer</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="nf">on_cumulative_ack</span><span class="p">(</span><span class="k">struct</span> <span class="n">session</span> <span class="o">*</span><span class="n">s</span><span class="p">,</span> <span class="kt">uint64_t</span> <span class="n">next_offset</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">advance_acknowledged_offset</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">next_offset</span><span class="p">);</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">s</span><span class="o">-&gt;</span><span class="n">writer_finalized</span> <span class="o">&amp;&amp;</span>
+        <span class="n">s</span><span class="o">-&gt;</span><span class="n">acknowledged_offset</span> <span class="o">==</span> <span class="n">s</span><span class="o">-&gt;</span><span class="n">final_size</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">send_completion_metadata</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>
+        <span class="n">s</span><span class="o">-&gt;</span><span class="n">transfer_state</span> <span class="o">=</span> <span class="n">TRANSFER_VERIFYING</span><span class="p">;</span>
+        <span class="k">return</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">pump_transfer</span><span class="p">(</span><span class="n">s</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div></div> <p>Nothing in the Stop handler waits synchronously for BLE. The event loop remains free to process acknowledgments, retransmission timers, disconnects, and finalization callbacks.</p> <h2 id="6-asynchronous-shutdown-is-a-lifetime-problem">6. Asynchronous shutdown is a lifetime problem</h2> <p>The most difficult failure appeared only after Stop. Normal streaming could run for a long time, yet teardown occasionally stalled or disconnected.</p> <p>The underlying lesson was broader than BLE: canceling an asynchronous operation does not necessarily erase every callback that has already been queued. A callback may still hold a pointer to session state after cleanup has started.</p> <p>A dangerous sequence looks like this:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>callback becomes ready
+        |
+Stop begins teardown
+        |
+session resources are released
+        |
+previously ready callback executes
+        |
+stale state is accessed
+</code></pre></div></div> <p>The solution is to make ownership and callback lifetime explicit:</p> <ul> <li>Mark the session as closing before cancellation.</li> <li>Make callbacks check the current lifecycle state.</li> <li>Stop registering new work once closing begins.</li> <li>Cancel or close event-loop handles through their asynchronous APIs.</li> <li>Release the session only after all owned handles report completion.</li> <li>Keep transfer state alive during the drain phase.</li> <li>Make finalization idempotent so repeated errors or disconnect events cannot free the same resource twice.</li> </ul> <p>An event-driven program often needs two forms of completion:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>logical completion:  the operation should no longer produce new work
+physical completion: no callback can reference its resources again
+</code></pre></div></div> <p>Confusing them is a common source of stop-path bugs.</p> <h2 id="7-completion-requires-verification">7. Completion requires verification</h2> <p>Reaching <code class="language-plaintext highlighter-rouge">final_size</code> on the sender is not enough. The phone must confirm that its local file has the same length and content.</p> <p>The completion exchange can include:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>session_id | final_size | final_crc32
+</code></pre></div></div> <p>The phone then:</p> <ol> <li>Flushes and closes its local file.</li> <li>Checks the local size.</li> <li>Computes CRC32 over the completed file.</li> <li>Reports success or requests recovery from a known offset.</li> </ol> <p>CRC32 is not a cryptographic integrity mechanism, but it is appropriate for detecting accidental corruption in a transport and storage pipeline. The important point is that verification covers the completed artifact, not only individual BLE messages.</p> <p>This produces a clear definition of success:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>phone_size == device_final_size
+    &amp;&amp;
+phone_crc32 == device_final_crc32
+</code></pre></div></div> <p>Only then should the UI display “synchronized.”</p> <h2 id="8-logging-the-state-not-just-the-error">8. Logging the state, not just the error</h2> <p>Timing-dependent failures are hard to diagnose from messages such as “BLE disconnected” or “timeout.” Those are consequences, not causes.</p> <p>I found it more useful to log a compact snapshot whenever the lifecycle changes:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>session=17
+acquisition=stopped
+writer=finalized
+transfer=draining
+produced=1824768
+sent=491520
+acked=475136
+pending_chunks=4
+connected=true
+</code></pre></div></div> <p>The most valuable fields were:</p> <ul> <li>Session identifier</li> <li>Acquisition state</li> <li>Writer state</li> <li>Transfer state</li> <li>Produced, sent, and acknowledged offsets</li> <li>Stable final size, when available</li> <li>Number of in-flight chunks</li> <li>Retry count</li> <li>Connection and callback-lifetime state</li> </ul> <p>With those values, “the download froze” becomes a narrower question:</p> <ul> <li>Did the writer finalize?</li> <li>Did the produced offset stop changing?</li> <li>Is the sender waiting for an ACK?</li> <li>Did the phone acknowledge beyond what was sent?</li> <li>Is a retry timer still registered?</li> <li>Was the transfer session released too early?</li> </ul> <h2 id="9-test-the-transitions-that-normal-use-hides">9. Test the transitions that normal use hides</h2> <p>The happy path is not enough for a synchronization protocol. I used transition-focused tests:</p> <ul> <li>Stop immediately after starting.</li> <li>Stop while a chunk is in flight.</li> <li>Stop when the reader is exactly at the current file end.</li> <li>Slow acknowledgments until the backlog becomes large.</li> <li>Drop an ACK and verify idempotent retransmission.</li> <li>Disconnect during collection and resume from the last confirmed offset.</li> <li>Disconnect during the drain phase.</li> <li>Repeat Stop and disconnect notifications.</li> <li>Compare device and phone CRC32 values after every completed run.</li> </ul> <p>Randomizing the Stop time was especially effective because it exercised different relationships between file writes, BLE notifications, timers, and callbacks.</p> <p>For each test, the same invariants should hold:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>acknowledged_offset never moves backward
+acknowledged_offset never exceeds sent_offset
+sent_offset never exceeds available file data
+final_size becomes immutable after writer finalization
+session memory outlives every callback that can reference it
+COMPLETE is reached only after end-to-end verification
+</code></pre></div></div> <h2 id="10-what-i-learned">10. What I learned</h2> <p>The final architecture was not one clever BLE optimization. It was a separation of responsibilities:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>acquisition controls when data production stops
+the writer defines when the file becomes final
+the transfer state machine controls reliable delivery
+the phone verifies the completed artifact
+the event loop coordinates transitions without blocking
+</code></pre></div></div> <p>The most important lessons were:</p> <ol> <li>Live display and lossless recording need different policies.</li> <li>Temporary EOF is not completion when a file is still growing.</li> <li>Byte offsets and cumulative acknowledgments make retries idempotent.</li> <li>If production is faster than transport, Stop must be followed by a drain phase.</li> <li>Asynchronous shutdown is fundamentally about ownership and callback lifetime.</li> <li>Completion means that both endpoints agree on size and integrity.</li> <li>State snapshots and invariants are more useful than generic timeout logs.</li> </ol> <p>What looked at first like a Bluetooth transfer feature became a systems problem spanning acquisition timing, storage visibility, protocol design, event-driven control flow, and resource lifetime. That is exactly why I found it valuable: reliable embedded systems are built at the boundaries between components, where individually reasonable behaviors can combine into an incorrect whole.</p> <h2 id="related-notes">Related notes</h2> <ul> <li><a href="/projects/fnirs-acquisition/">Embedded fNIRS Acquisition System</a></li> <li><a href="/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/">Understanding Event-Driven I/O with libevent and libuv</a></li> <li><a href="/blog/2026/crossing-thread-boundaries-in-libevent/">Crossing Thread Boundaries Safely in libevent</a></li> </ul> </div> </article> <br> <hr> <br> <h2 class="text-3xl font-semibold mb-4 mt-12">Enjoy Reading This Article?</h2> <p class="mb-2">Here are some more articles you might like to read next:</p> <ul class="list-disc pl-7 my-3 space-y-2 marker:text-[var(--global-theme-color)]"> <li class="leading-relaxed"> <a class="underline decoration-1 hover:text-[var(--global-hover-color)]" href="/blog/2026/crossing-thread-boundaries-in-libevent/">Crossing Thread Boundaries Safely in libevent</a> </li> <li class="leading-relaxed"> <a class="underline decoration-1 hover:text-[var(--global-hover-color)]" href="/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/">Understanding Event-Driven I/O with libevent and libuv</a> </li> </ul> </div> </div> <footer class="fixed-bottom" role="contentinfo"> <div class="container mt-0"> © Copyright 2026 Alex Jin. Powered by <a href="https://jekyllrb.com/" target="_blank" rel="external nofollow noopener">Jekyll</a> with <a href="https://github.com/alshedivat/al-folio" rel="external nofollow noopener" target="_blank">al-folio</a> theme. Hosted by <a href="https://pages.github.com/" target="_blank" rel="external nofollow noopener">GitHub Pages</a>. </div> </footer> <script>
+  window.alFolio = {
+    compatBootstrap: false
+  };
+</script> <script src="/assets/js/nav-toggle.js?v=141bd79a73ebc0f0b6ea58e440ae79fc"></script> <script defer src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js" integrity="sha256-Nn1q/fx0H7SNLZMQ5Hw5JLaTRZp0yILA/FRexe19VdI=" crossorigin="anonymous"></script> <script defer src="https://cdn.jsdelivr.net/npm/imagesloaded@5.0.0/imagesloaded.pkgd.min.js" integrity="sha256-htrLFfZJ6v5udOG+3kNLINIKh2gvoKqwEhHYfTTMICc=" crossorigin="anonymous"></script> <script defer src="/assets/js/masonry.js?v=e49affc7bd2646f6acdad1dbe02c2359" type="text/javascript"></script> <script defer type="text/javascript" id="MathJax-script" src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js" integrity="sha256-MASABpB4tYktI2Oitl4t+78w/lyA+D7b/s9GEP0JOGI=" crossorigin="anonymous"></script> <script src="/assets/al_math/js/mathjax-setup.js"></script> <script defer src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6" crossorigin="anonymous"></script> <script src="/assets/js/tooltips-setup.js?v=fe487e99db6c43751e6e7bdb2d6a0611"></script> <script src="/assets/js/no_defer.js?v=53b1b1a645525975c963ce8bf8bfefcf"></script> <script defer src="/assets/js/common.js?v=87baac90f765f2f3362dcf6aaf312a8a"></script> <script defer src="/assets/js/copy_code.js?v=c8a01c11a92744d44b093fc3bda915df" type="text/javascript"></script> <script defer src="/assets/js/jupyter_new_tab.js?v=896d254890d9b47f0281f63bfccf0dee"></script> <script async src="https://d1bxh8uas1mnw7.cloudfront.net/assets/embed.js"></script> <script async src="https://badge.dimensions.ai/badge.js"></script> <script defer src="https://cdn.jsdelivr.net/npm/medium-zoom@1.1.0/dist/medium-zoom.min.js" integrity="sha256-ZgMyDAIYDYGxbcpJcfUnYwNevG/xi9OHKaR/8GK+jWc=" crossorigin="anonymous"></script> <script defer src="/assets/al_img_tools/js/zoom.js"></script> <script defer src="/assets/js/progress-bar.js?v=499464c5c63ced6cf7ad62509f1e2610" type="text/javascript"></script> <script src="https://cdn.jsdelivr.net/npm/vanilla-back-to-top@7.2.1/dist/vanilla-back-to-top.min.js" integrity="sha256-uMJJ3EoTyfRBoTbR+lrfu1uRQ87RZG8AR3cVNuQVeFg=" crossorigin="anonymous"></script> <script>
+    addBackToTop();
+  </script> <script type="module" src="/assets/al_search/js/search/ninja-keys.min.js"></script> <ninja-keys hidebreadcrumbs noautoloadmdicons placeholder="Type to start searching"></ninja-keys> <script src="/assets/al_search/js/search-setup.js"></script> <script>
+// get the ninja-keys element
+const ninja = document.querySelector('ninja-keys');
+
+// add the home and posts menu items
+ninja.data = [{
+    id: "nav-about",
+    title: "about",
+    section: "Navigation",
+    handler: () => {
+      window.location.href = "/";
+    },
+  },{id: "nav-blog",
+          title: "blog",
+          description: "",
+          section: "Navigation",
+          handler: () => {
+            window.location.href = "/blog/";
+          },
+        },{id: "nav-projects",
+          title: "projects",
+          description: "A collection of projects I build, maintain, and explore.",
+          section: "Navigation",
+          handler: () => {
+            window.location.href = "/projects/";
+          },
+        },{id: "post-designing-reliable-live-data-acquisition-and-file-synchronization-over-ble",
+        
+          title: "Designing Reliable Live Data Acquisition and File Synchronization over BLE",
+        
+        description: "How I separated live waveform preview from lossless file delivery, tailed a growing recording, and made Stop mean drain and verify instead of disconnect.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/designing-reliable-live-data-acquisition-and-file-synchronization-over-ble/";
+          
+        },
+      },{id: "post-crossing-thread-boundaries-safely-in-libevent",
+        
+          title: "Crossing Thread Boundaries Safely in libevent",
+        
+        description: "How I connected a BlueZ GATT thread to a libevent main loop using an eventfd, a protected job queue, and a socketpair response channel.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/crossing-thread-boundaries-in-libevent/";
+          
+        },
+      },{id: "post-understanding-event-driven-i-o-with-libevent-and-libuv",
+        
+          title: "Understanding Event-Driven I/O with libevent and libuv",
+        
+        description: "What I learned about file descriptors, non-blocking I/O, event loops, callbacks, and the boundary between event-driven code and threads.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/";
+          
+        },
+      },{id: "projects-embedded-fnirs-acquisition-system",
+          title: 'Embedded fNIRS Acquisition System',
+          description: "An event-driven embedded Linux application coordinating Bluetooth, CAN, UART, timers, and a non-blocking sampling state machine.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/fnirs-acquisition/";
+            },},{id: "projects-github-projects",
+          title: 'GitHub Projects',
+          description: "Explore the open-source projects I build and maintain.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/github/";
+            },},{
+        id: 'social-github',
+        title: 'GitHub',
+        section: 'Socials',
+        handler: () => {
+          window.open("https://github.com/alexjin520", "_blank");
+        },
+      },{
+        id: 'social-rss',
+        title: 'RSS Feed',
+        section: 'Socials',
+        handler: () => {
+          window.open("/feed.xml", "_blank");
+        },
+      },{
+      id: 'light-theme',
+      title: 'Change theme to light',
+      description: 'Change the theme of the site to Light',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("light");
+      },
+    },
+    {
+      id: 'dark-theme',
+      title: 'Change theme to dark',
+      description: 'Change the theme of the site to Dark',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("dark");
+      },
+    },
+    {
+      id: 'system-theme',
+      title: 'Use system default theme',
+      description: 'Change the theme of the site to System Default',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("system");
+      },
+    },];
+
+</script> <script src="/assets/al_search/js/shortcut-key.js"></script> </body> </html>
