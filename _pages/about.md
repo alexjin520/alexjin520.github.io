@@ -32,7 +32,6 @@ This website is my digital garden. I use it to organize technical notes, documen
     <div class="education-details">
       <h4>University of California, Los Angeles</h4>
       <p>Incoming Master of Science in Computer Engineering</p>
-      <p class="education-meta">Expected May 2028 · Los Angeles, California</p>
     </div>
   </article>
   <article class="education-item">
@@ -40,9 +39,6 @@ This website is my digital garden. I use it to organize technical notes, documen
     <div class="education-details">
       <h4>University of Illinois Urbana-Champaign</h4>
       <p>Bachelor of Science in Computer Engineering</p>
-      <p class="education-meta">
-        GPA: 3.70/4.00 · Dean's List: Fall 2022, Spring 2023, Fall 2023
-      </p>
     </div>
   </article>
 </div>
