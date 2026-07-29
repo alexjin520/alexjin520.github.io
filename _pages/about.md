@@ -2,7 +2,7 @@
 layout: about
 title: about
 permalink: /
-subtitle: Software Development · Embedded Systems · Open Source
+subtitle: Incoming UCLA M.S. · Embedded Linux · Sensing Systems
 
 profile: false
 
@@ -18,11 +18,20 @@ latest_posts:
   limit: 3
 ---
 
-Hello, I am **Alex Jin**, a developer who enjoys technology and creating useful things.
+Hello, I am **Alex Jin**, an incoming M.S. student in Computer Engineering at
+UCLA and a recent Computer Engineering graduate from UIUC.
 
-I am interested in software development, embedded systems, and open source. I enjoy understanding how systems work and turning ideas into practical projects.
+I build software close to hardware: event-driven embedded Linux applications,
+wireless sensing systems, and reliable data-acquisition pipelines. I am
+especially interested in how system architecture, concurrency, and
+communication protocols affect the correctness of real devices.
 
-This website is my digital garden. I use it to organize technical notes, document project work, and share what I learn along the way.
+For Fall 2026, I am seeking research opportunities in embedded and cyber-physical
+systems, mobile or health sensing, edge systems, and dependable device
+software.
+
+This website collects selected engineering projects and technical notes, with
+an emphasis on the problem, my contribution, and measured results.
 
 ### Education
 
@@ -45,8 +54,11 @@ This website is my digital garden. I use it to organize technical notes, documen
 
 ### Areas of Interest
 
-- Embedded Linux and systems development
-- Software engineering and developer tools
-- Open-source projects and engineering practices
+- Embedded Linux, event-driven I/O, and systems software
+- Mobile, wearable, and health sensing systems
+- Wireless communication and reliable data acquisition
+- Edge and cyber-physical systems
 
-Visit my [GitHub profile](https://github.com/alexjin520) to see the projects I am building and maintaining.
+Start with the [Embedded fNIRS Acquisition System]({{ '/projects/fnirs-acquisition/' | relative_url }})
+or [OmniSense-Dual]({{ '/projects/omnisense-dual/' | relative_url }}), and visit
+my [GitHub profile](https://github.com/alexjin520) for source code.
