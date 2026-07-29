@@ -25,7 +25,7 @@ host over Wi-Fi.
   <a class="project-action" href="{{ '/assets/pdf/omnisense-dual-presentation.pdf' | relative_url }}">
     Presentation (PDF)
   </a>
-  <a class="project-action" href="https://github.com/alexjin520/lab-notebook-ece445-group10">
+  <a class="project-action" href="https://github.com/alexjin520/OmniSense-Dual-Wearable-Navigation-System">
     Lab Notebook &amp; Source
   </a>
 </div>
@@ -56,8 +56,8 @@ host over Wi-Fi.
 
 For each of eight compass directions, the fusion pipeline selects the closest
 valid ToF or mmWave observation. It then merges the head- and waist-level
-results using the same safety-first rule. IMU tilt compensation suppresses
-ground-reflection false positives, and six distance zones are encoded through
+results using the same safety-first rule. IMU data supports orientation and
+optional tilt-aware filtering, while six distance zones are encoded through
 motor intensity, pulse frequency, and temporal pattern.
 
 ## My contributions
@@ -83,7 +83,7 @@ recorded walking sessions.
 | ------------------------------------- | ------: |
 | Recorded sensor packets               |   1,986 |
 | Malformed packets                     |       0 |
-| Automated tests                       |     134 |
+| Automated tests                       |     139 |
 | Median server processing time         | 15.5 ms |
 | p95 server processing time            |   33 ms |
 | Worst ToF distance error from 0.5–2 m |    2.0% |
