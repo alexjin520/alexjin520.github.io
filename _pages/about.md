@@ -18,8 +18,8 @@ latest_posts:
   limit: 3
 ---
 
-Hello, I am **Alex Jin**, an incoming M.S. student in Computer Engineering at
-UCLA and a recent Computer Engineering graduate from UIUC.
+Hello, I am **Alex Jin**, an incoming M.S. student in Electrical and Computer
+Engineering at UCLA and a recent Computer Engineering graduate from UIUC.
 
 I build software close to hardware: event-driven embedded Linux applications,
 wireless sensing systems, and reliable data-acquisition pipelines. I am
@@ -40,7 +40,7 @@ an emphasis on the problem, my contribution, and measured results.
     <div class="education-date">Sep 2026 — May 2028</div>
     <div class="education-details">
       <h4>University of California, Los Angeles</h4>
-      <p>Incoming Master of Science in Computer Engineering</p>
+      <p>Incoming Master of Science in Electrical and Computer Engineering</p>
     </div>
   </article>
   <article class="education-item">
