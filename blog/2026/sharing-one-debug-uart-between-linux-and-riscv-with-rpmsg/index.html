@@ -1,0 +1,219 @@
+<!DOCTYPE html> <html lang="en"> <head> <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"> <meta charset="utf-8"> <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no"> <meta http-equiv="X-UA-Compatible" content="IE=edge"> <title> Sharing One Debug UART Between Linux and RISC-V with RPMsg | Alex Jin </title> <meta name="author" content="Alex Jin"> <meta name="description" content="How I replaced cross-core UART contention with a buffered RPMsg log relay, a host-ready handshake, and a race-free startup sequence."> <meta name="keywords" content="Alex Jin, software development, embedded systems, open source, technical blog"> <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https:; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: https:; font-src 'self' data: https:; media-src 'self' https:; frame-src 'self' https:; connect-src 'self' https:;"> <style>
+  :root {
+    --max-content-width: 930px;
+  }
+</style> <link rel="stylesheet" href="/assets/css/tailwind.css?v=50c64c15cbb9fd1ce6056fdb8bcb4b62"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.2.0/css/all.min.css" integrity="sha256-MVopmdyC2tYTiJ8wlktf0uh0v4NgT+vNdyVFepi7Q0c=" crossorigin="anonymous"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/academicons@1.9.5/css/academicons.min.css" integrity="sha256-SzrCOBJbGVFMahewkgjwnApaV2+av1DwMAA+/QGLyZw=" crossorigin="anonymous"> <link defer rel="stylesheet" href="https://cdn.jsdelivr.net/npm/scholar-icons@1.0.3/css/scholar-icons.css" integrity="sha256-VY3hHVj/hNX3fYG6wtbA6TcKJQl7+FthzGSyIB64klY=" crossorigin="anonymous"> <link defer rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700|Roboto+Slab:100,300,400,500,700|Material+Icons&amp;display=swap"> <link defer rel="stylesheet" href="/assets/css/jekyll-pygments-themes-github.css?v=591dab5a4e56573bf4ef7fd332894c99" media="" id="highlight_theme_light"> <link rel="shortcut icon" href="data:image/svg+xml,&lt;svg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%20100%20100%22&gt;&lt;text%20y=%22.9em%22%20font-size=%2290%22&gt;%F0%9F%9B%A0%EF%B8%8F&lt;/text&gt;&lt;/svg&gt;"> <link rel="stylesheet" href="/assets/css/main.css?v=f0b101217084a90093badfe99ff9a7d1"> <link rel="canonical" href="https://alexjin520.github.io/blog/2026/sharing-one-debug-uart-between-linux-and-riscv-with-rpmsg/"> <script src="/assets/js/theme.js?v=7af685e2ba20b37fef545c97b8064050"></script> <link defer rel="stylesheet" href="/assets/css/jekyll-pygments-themes-native.css?v=5847e5ed4a4568527aa6cfab446049ca" media="none" id="highlight_theme_dark"> <script>
+    initTheme();
+  </script> </head> <body class="fixed-top-nav "> <header> <nav id="navbar" class="navbar navbar-light navbar-expand-sm fixed-top" role="navigation"> <div class="container"> <a class="navbar-brand title font-weight-lighter" href="/"> Alex Jin </a> <button class="navbar-toggler collapsed navbar-toggler-main" type="button" data-nav-toggle="navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation"> <span class="sr-only">Toggle navigation</span> <span class="icon-bar top-bar"></span> <span class="icon-bar middle-bar"></span> <span class="icon-bar bottom-bar"></span> </button> <div class="collapse navbar-collapse navbar-collapse-main" id="navbarNav"> <ul class="navbar-nav navbar-menu-list flex-nowrap"> <li class="nav-item "> <a class="nav-link" href="/">about </a> </li> <li class="nav-item active"> <a class="nav-link" href="/blog/">blog </a> </li> <li class="nav-item "> <a class="nav-link" href="/projects/">projects </a> </li> <li class="nav-item"> <button id="search-toggle" type="button" title="Search" aria-label="Open search"> <span class="nav-link">ctrl k <i class="fa-solid fa-magnifying-glass"></i></span> </button> </li> <li class="toggle-container"> <button id="light-toggle" type="button" title="Change theme" aria-label="Change color theme"> <i class="fa-half-sun-moon" id="light-toggle-system"></i> <i class="fa-solid fa-moon" id="light-toggle-dark"></i> <i class="fa-solid fa-sun" id="light-toggle-light"></i> </button> </li> </ul> </div> </div> </nav> <progress id="progress" value="0"> <div class="progress-container"> <span class="progress-bar"></span> </div> </progress> </header> <div class="container mt-5" role="main"> <div class="post"> <header class="post-header"> <h1 class="post-title">Sharing One Debug UART Between Linux and RISC-V with RPMsg</h1> <p class="post-meta"> Created on August 06, 2026 </p> <p class="post-tags"> <a href="/blog/2026"> <i class="fa-solid fa-calendar fa-sm"></i> 2026 </a>   ·   <a href="/blog/tag/embedded-linux"> <i class="fa-solid fa-hashtag fa-sm"></i> Embedded Linux</a>   <a href="/blog/tag/risc-v"> <i class="fa-solid fa-hashtag fa-sm"></i> RISC-V</a>   <a href="/blog/tag/rpmsg"> <i class="fa-solid fa-hashtag fa-sm"></i> RPMsg</a>   <a href="/blog/tag/linux-kernel"> <i class="fa-solid fa-hashtag fa-sm"></i> Linux Kernel</a>   ·   <a href="/blog/category/technical-notes"> <i class="fa-solid fa-tag fa-sm"></i> Technical Notes</a> </p> </header> <article class="post-content"> <div id="markdown-content"> <p>I recently brought up the RISC-V auxiliary core on an Ingenic X2600 board. Linux runs on the main core, while a small FreeRTOS firmware image runs on the RISC-V core. Both sides had useful debug output, but they also tried to use the same physical UART.</p> <p>That made an otherwise simple logging problem surprisingly difficult. A line from Linux could be interrupted halfway through by a line from RISC-V. Boot messages were sometimes missing, shell escape sequences leaked into the output, and the result depended on which core reached the UART first.</p> <p>The solution was not a more complicated UART lock. I gave Linux exclusive ownership of the UART and turned the small core’s output into messages:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>RISC-V printf -&gt; ring buffer -&gt; RPMsg -&gt; Linux driver -&gt; printk -&gt; UART
+</code></pre></div></div> <p>This article describes the complete path, including the two startup races that only appeared during cold boot.</p> <h2 id="1-one-peripheral-needs-one-owner">1. One peripheral needs one owner</h2> <p>The initial design effectively looked like this:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>Linux printk ---------------------&gt; UART
+RISC-V printf --------------------&gt; UART
+</code></pre></div></div> <p>The two cores do not share a scheduler, and an ordinary mutex on one core cannot serialize code running on the other. A hardware spinlock or a custom shared-memory lock could protect individual writes, but it would introduce several new questions:</p> <ul> <li>What happens if one core crashes while holding the lock?</li> <li>Can an interrupt handler wait for it safely?</li> <li>How are clocks, pin configuration, and baud-rate changes coordinated?</li> <li>How are messages distinguished after they reach the terminal?</li> </ul> <p>The cleaner rule is:</p> <blockquote> <p>Linux owns the debug UART. RISC-V produces log records, not UART transactions.</p> </blockquote> <p>This moves serialization to one place and keeps all board-level UART configuration under Linux control.</p> <h2 id="2-the-resulting-data-path">2. The resulting data path</h2> <p>I reused the board’s existing RPMsg transport. Endpoint 1 is reserved for RISC-V logs, while other endpoints remain available for their original console or application traffic.</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>RISC-V / FreeRTOS                         Linux
+
+printf / prom_printk
+        |
+        v
+    _write()
+        |
+        v
+rtos_console_write()
+        |
+        v
+8 KiB circular buffer
+        |
+        v
+log forwarding task
+        |
+        v
+riscv_log_send()
+        |
+        +------ RPMsg endpoint 1 ------&gt; receive callback
+                                              |
+                                              v
+                                        bounded skb queue
+                                              |
+                                              v
+                                           worker
+                                              |
+                                              v
+                                      printk("[RISCV] ...")
+                                              |
+                                              v
+                                             UART
+</code></pre></div></div> <p>There are two important boundaries in this diagram. The circular buffer separates log producers from RPMsg availability on the small core. The Linux queue and worker separate the RPMsg receive callback from text formatting and console output.</p> <h2 id="3-redirecting-the-small-core-output">3. Redirecting the small-core output</h2> <p>The firmware already had a newlib-style <code class="language-plaintext highlighter-rouge">_write()</code> hook used by <code class="language-plaintext highlighter-rouge">printf()</code>. Instead of sending bytes to a UART, <code class="language-plaintext highlighter-rouge">_write()</code> now passes them to <code class="language-plaintext highlighter-rouge">rtos_console_write()</code>, which appends them to an 8 KiB circular buffer.</p> <p>The same path also handles low-level firmware printing. I added relay implementations of <code class="language-plaintext highlighter-rouge">prom_printk()</code>, <code class="language-plaintext highlighter-rouge">prom_putchar()</code>, and <code class="language-plaintext highlighter-rouge">prom_putstr()</code> so code below the C library does not bypass the new ownership rule.</p> <p>Conceptually, every producer now ends at the same function:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="kt">int</span> <span class="nf">rtos_console_write</span><span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="n">data</span><span class="p">,</span> <span class="kt">int</span> <span class="n">len</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="kt">int</span> <span class="n">written</span> <span class="o">=</span> <span class="n">circ_buffer_write</span><span class="p">(</span><span class="o">&amp;</span><span class="n">log_buffer</span><span class="p">,</span> <span class="n">data</span><span class="p">,</span> <span class="n">len</span><span class="p">);</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">log_task_ready</span><span class="p">)</span>
+        <span class="n">wake_log_task</span><span class="p">();</span>
+
+    <span class="k">return</span> <span class="n">written</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></div> <p>The real implementation also chooses the interrupt-safe semaphore operation when called from interrupt context.</p> <p>A dedicated FreeRTOS task drains the buffer in RPMsg-sized chunks. Application code therefore continues to use normal calls such as:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">printf</span><span class="p">(</span><span class="s">"sensor task started</span><span class="se">\n</span><span class="s">"</span><span class="p">);</span>
+</code></pre></div></div> <p>There is no need to call <code class="language-plaintext highlighter-rouge">riscv_log_send()</code> from each feature. Keeping that transport detail below <code class="language-plaintext highlighter-rouge">printf()</code> makes the mechanism easy to adopt and difficult to bypass accidentally.</p> <p>The RISC-V firmware build also excludes its direct serial implementation. Redirection is only reliable if no second code path can silently reclaim the UART.</p> <h2 id="4-preserving-early-boot-messages">4. Preserving early boot messages</h2> <p>Buffering solves a scheduling problem, but it does not by itself solve startup ordering.</p> <p>The small core may start before Linux has probed the RPMsg device and installed its receive callback. If the forwarding task drains immediately, RPMsg can accept or discard data before a Linux consumer exists. The most valuable boot messages then disappear.</p> <p>I added a tiny ready protocol:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>RISC-V creates endpoint 1 and buffers logs
+                    |
+                    v
+Linux probes endpoint 1 and installs callback
+                    |
+                    v
+Linux sends "RISC-V-LOG-READY"
+                    |
+                    v
+RISC-V marks host_ready = true
+                    |
+                    v
+RISC-V drains all buffered startup logs
+</code></pre></div></div> <p>Until this exact message arrives, <code class="language-plaintext highlighter-rouge">riscv_log_send()</code> refuses to transmit and the log task leaves the circular buffer intact. Once the handshake is received, the task wakes and flushes both early and current output in order.</p> <p>The marker is deliberately a protocol message instead of a fixed delay. A 100 ms delay may work on one image and fail on another; “the receiver has installed its callback” is the state the sender actually needs to know.</p> <h2 id="5-the-name-service-race-retrying-is-not-waiting">5. The name-service race: retrying is not waiting</h2> <p>The first handshake implementation still failed intermittently during a cold boot. Linux reported that the RPMsg host was online, but it never created the named channels. Endpoint 1 did not appear, so Linux never had a device on which to send the ready message.</p> <p>The problem was in endpoint announcement. The helper attempted <code class="language-plaintext highlighter-rouge">rpmsg_ns_announce()</code> repeatedly while it returned <code class="language-plaintext highlighter-rouge">RL_NOT_READY</code>. It performed 65,535 tight retries, which sounds generous. In practice, all those iterations could finish before Linux brought up the remote virtio/RPMsg link.</p> <p>This is a useful embedded-systems lesson:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>many immediate retries != waiting for a state transition
+</code></pre></div></div> <p>The fix was to wait on the condition represented by the transport itself:</p> <div class="language-c highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="n">rpmsg_lite_wait_for_link_up</span><span class="p">(</span><span class="n">rpmsg_instance</span><span class="p">);</span>
+
+<span class="n">ret</span> <span class="o">=</span> <span class="n">rpmsg_ns_announce</span><span class="p">(</span><span class="n">rpmsg_instance</span><span class="p">,</span>
+                        <span class="n">rpmsg_endpoint</span><span class="p">,</span>
+                        <span class="n">endpoint_name</span><span class="p">,</span>
+                        <span class="mi">0</span><span class="p">);</span>
+</code></pre></div></div> <p>After the link-up wait returns, one announcement is enough. Linux then creates the <code class="language-plaintext highlighter-rouge">ingenic_rpmsg</code> channels for endpoints 1, 2, and 3 consistently.</p> <p>This race was easy to misdiagnose because the remote processor itself was already shown as <code class="language-plaintext highlighter-rouge">running</code>. That state only means the firmware is executing. It does not prove that the RPMsg link is up, name service completed, a Linux driver bound, or the log handshake succeeded.</p> <h2 id="6-keeping-the-linux-receive-callback-short">6. Keeping the Linux receive callback short</h2> <p>On Linux, I extended the existing Ingenic RPMsg driver so that one configured endpoint is consumed by the kernel log relay. Other endpoints retain the original character-device behavior.</p> <p>The receive callback executes in a context where blocking console work is undesirable. It therefore performs only bounded operations:</p> <ol> <li>Allocate an <code class="language-plaintext highlighter-rouge">sk_buff</code> with <code class="language-plaintext highlighter-rouge">GFP_ATOMIC</code>.</li> <li>Copy the incoming RPMsg payload.</li> <li>Append it to a spinlock-protected queue.</li> <li>Schedule a work item.</li> <li>Return.</li> </ol> <p>The worker drains the queue later and emits the text with <code class="language-plaintext highlighter-rouge">pr_info()</code>.</p> <p>I also bounded both memory and output behavior:</p> <ul> <li>The queue holds at most 128 RPMsg log messages.</li> <li>A rendered line is limited to 512 bytes.</li> <li>Carriage returns are removed.</li> <li>Unexpected control characters become <code class="language-plaintext highlighter-rouge">.</code> instead of reaching the terminal.</li> <li>Overflow increments a drop counter and produces a warning.</li> </ul> <p>Every relayed line receives an explicit prefix:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>[RISCV] riscv start
+[RISCV] RISC-V printer log relay ready
+</code></pre></div></div> <p>Linux’s own messages keep their normal format. The prefix makes the origin visible even though both cores now share the same final UART.</p> <p>Endpoint 1 becomes a single-consumer channel once the kernel relay is enabled, so userspace opening that character device receives <code class="language-plaintext highlighter-rouge">-EBUSY</code>. This prevents a userspace reader and the kernel worker from competing for the same log records.</p> <h2 id="7-boot-integration-matters-too">7. Boot integration matters too</h2> <p>On this board, U-Boot may start an RISC-V image before Linux boots. The Linux remoteproc state can therefore already say <code class="language-plaintext highlighter-rouge">running</code>, and the firmware name can already be <code class="language-plaintext highlighter-rouge">console.elf</code>.</p> <p>That still does not guarantee that the running bytes match the firmware installed in the current root filesystem. An older image with the same filename may lack the ready-handshake implementation and wait forever or lose early logs.</p> <p>The init script consequently reloads <code class="language-plaintext highlighter-rouge">console.elf</code> once per Linux boot:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>first start in this Linux boot
+    -&gt; stop an already-running image if necessary
+    -&gt; select console.elf
+    -&gt; start remoteproc
+    -&gt; create a volatile marker under /run
+
+later duplicate start
+    -&gt; firmware is running, endpoint exists, marker exists
+    -&gt; do nothing
+</code></pre></div></div> <p>The marker prevents unnecessary resets during the same boot, while its location under <code class="language-plaintext highlighter-rouge">/run</code> makes it disappear on reboot. It records that the Linux init script performed its reload; it is not a substitute for the RPMsg ready handshake.</p> <p>This small distinction is important. A process marker, remoteproc state, link state, channel state, and application readiness are five different facts.</p> <h2 id="8-verifying-the-complete-chain">8. Verifying the complete chain</h2> <p>I tested the feature as a chain of observable states rather than relying on one “running” flag.</p> <p>First, confirm that the intended firmware is running:</p> <div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">cat</span> /sys/class/remoteproc/remoteproc0/firmware
+<span class="nb">cat</span> /sys/class/remoteproc/remoteproc0/state
+</code></pre></div></div> <p>Expected values are <code class="language-plaintext highlighter-rouge">console.elf</code> and <code class="language-plaintext highlighter-rouge">running</code>.</p> <p>Next, confirm that name service produced the endpoints:</p> <div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="nb">ls</span> <span class="nt">-l</span> /sys/class/ingenic_rpmsg/
+</code></pre></div></div> <p>The result should include <code class="language-plaintext highlighter-rouge">rpmsg-1</code>, <code class="language-plaintext highlighter-rouge">rpmsg-2</code>, and <code class="language-plaintext highlighter-rouge">rpmsg-3</code>. Endpoint 1 proves that Linux saw the log-channel announcement.</p> <p>Finally, inspect the kernel ring buffer:</p> <div class="language-sh highlighter-rouge"><div class="highlight"><pre class="highlight"><code>dmesg | <span class="nb">grep</span> <span class="nt">-E</span> <span class="s1">'forwarding RISC-V|ready handshake|\[RISCV\]'</span>
+</code></pre></div></div> <p>A successful cold boot contains all three stages:</p> <div class="language-text highlighter-rouge"><div class="highlight"><pre class="highlight"><code>forwarding RISC-V endpoint 1 to kernel console
+RISC-V log ready handshake sent
+[RISCV] riscv start
+[RISCV] RISC-V printer log relay ready
+</code></pre></div></div> <p>The BusyBox version of <code class="language-plaintext highlighter-rouge">dmesg</code> on this target does not support <code class="language-plaintext highlighter-rouge">dmesg -w</code>, so repeated snapshots or the serial console itself are more portable ways to watch new output.</p> <p>For an active test, any RISC-V task can call <code class="language-plaintext highlighter-rouge">printf("printer relay test\n")</code>. Seeing <code class="language-plaintext highlighter-rouge">[RISCV] printer relay test</code> in the Linux log confirms the full path from the C library, through the FreeRTOS buffer and RPMsg, to the Linux worker and UART.</p> <h2 id="9-what-this-design-taught-me">9. What this design taught me</h2> <p>The final code is relatively small, but the design carries several reusable lessons.</p> <p><strong>Prefer ownership over distributed locking.</strong> When two processors want one peripheral, choose one owner and communicate with it. The resulting failure modes are much easier to reason about.</p> <p><strong>Readiness is protocol state.</strong> Processor running, link up, channel announced, callback installed, and application ready are not synonyms. If a sender depends on one of them, represent it explicitly.</p> <p><strong>Retry based on time or state, not iteration count.</strong> A huge tight loop may take less time than the device on the other side needs for one scheduling interval.</p> <p><strong>Keep transport callbacks bounded.</strong> Queue the data in the callback and do formatting, console output, and other potentially slow work in task or process context.</p> <p><strong>Buffer at asynchronous boundaries.</strong> The small-core ring buffer protects early logs and decouples producers from link timing. The Linux queue decouples RPMsg delivery from the console.</p> <p><strong>Make observability part of the design.</strong> The <code class="language-plaintext highlighter-rouge">[RISCV]</code> prefix, ready-handshake messages, endpoint sysfs entries, and drop warnings turned a multi-stage boot sequence into something that can be inspected one invariant at a time.</p> <p>The most important outcome is not merely that two cores can print. It is that there is now one deterministic logging path, one UART owner, and a startup protocol that explains exactly when logs are safe to send.</p> </div> </article> <br> <hr> <br> <h2 class="text-3xl font-semibold mb-4 mt-12">Enjoy Reading This Article?</h2> <p class="mb-2">Here are some more articles you might like to read next:</p> <ul class="list-disc pl-7 my-3 space-y-2 marker:text-[var(--global-theme-color)]"> <li class="leading-relaxed"> <a class="underline decoration-1 hover:text-[var(--global-hover-color)]" href="/blog/2026/designing-reliable-live-data-acquisition-and-file-synchronization-over-ble/">Designing Reliable Live Data Acquisition and File Synchronization over BLE</a> </li> <li class="leading-relaxed"> <a class="underline decoration-1 hover:text-[var(--global-hover-color)]" href="/blog/2026/crossing-thread-boundaries-in-libevent/">Crossing Thread Boundaries Safely in libevent</a> </li> <li class="leading-relaxed"> <a class="underline decoration-1 hover:text-[var(--global-hover-color)]" href="/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/">Understanding Event-Driven I/O with libevent and libuv</a> </li> </ul> </div> </div> <footer class="fixed-bottom" role="contentinfo"> <div class="container mt-0"> © Copyright 2026 Alex Jin. Powered by <a href="https://jekyllrb.com/" target="_blank" rel="external nofollow noopener">Jekyll</a> with <a href="https://github.com/alshedivat/al-folio" rel="external nofollow noopener" target="_blank">al-folio</a> theme. Hosted by <a href="https://pages.github.com/" target="_blank" rel="external nofollow noopener">GitHub Pages</a>. </div> </footer> <script>
+  window.alFolio = {
+    compatBootstrap: false
+  };
+</script> <script src="/assets/js/nav-toggle.js?v=141bd79a73ebc0f0b6ea58e440ae79fc"></script> <script defer src="https://cdn.jsdelivr.net/npm/masonry-layout@4.2.2/dist/masonry.pkgd.min.js" integrity="sha256-Nn1q/fx0H7SNLZMQ5Hw5JLaTRZp0yILA/FRexe19VdI=" crossorigin="anonymous"></script> <script defer src="https://cdn.jsdelivr.net/npm/imagesloaded@5.0.0/imagesloaded.pkgd.min.js" integrity="sha256-htrLFfZJ6v5udOG+3kNLINIKh2gvoKqwEhHYfTTMICc=" crossorigin="anonymous"></script> <script defer src="/assets/js/masonry.js?v=e49affc7bd2646f6acdad1dbe02c2359" type="text/javascript"></script> <script defer type="text/javascript" id="MathJax-script" src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js" integrity="sha256-MASABpB4tYktI2Oitl4t+78w/lyA+D7b/s9GEP0JOGI=" crossorigin="anonymous"></script> <script src="/assets/al_math/js/mathjax-setup.js"></script> <script defer src="https://cdnjs.cloudflare.com/polyfill/v3/polyfill.min.js?features=es6" crossorigin="anonymous"></script> <script src="/assets/js/tooltips-setup.js?v=fe487e99db6c43751e6e7bdb2d6a0611"></script> <script src="/assets/js/no_defer.js?v=53b1b1a645525975c963ce8bf8bfefcf"></script> <script defer src="/assets/js/common.js?v=87baac90f765f2f3362dcf6aaf312a8a"></script> <script defer src="/assets/js/copy_code.js?v=c8a01c11a92744d44b093fc3bda915df" type="text/javascript"></script> <script defer src="/assets/js/jupyter_new_tab.js?v=896d254890d9b47f0281f63bfccf0dee"></script> <script async src="https://d1bxh8uas1mnw7.cloudfront.net/assets/embed.js"></script> <script async src="https://badge.dimensions.ai/badge.js"></script> <script defer src="https://cdn.jsdelivr.net/npm/medium-zoom@1.1.0/dist/medium-zoom.min.js" integrity="sha256-ZgMyDAIYDYGxbcpJcfUnYwNevG/xi9OHKaR/8GK+jWc=" crossorigin="anonymous"></script> <script defer src="/assets/al_img_tools/js/zoom.js"></script> <script defer src="/assets/js/progress-bar.js?v=499464c5c63ced6cf7ad62509f1e2610" type="text/javascript"></script> <script src="https://cdn.jsdelivr.net/npm/vanilla-back-to-top@7.2.1/dist/vanilla-back-to-top.min.js" integrity="sha256-uMJJ3EoTyfRBoTbR+lrfu1uRQ87RZG8AR3cVNuQVeFg=" crossorigin="anonymous"></script> <script>
+    addBackToTop();
+  </script> <script type="module" src="/assets/al_search/js/search/ninja-keys.min.js"></script> <ninja-keys hidebreadcrumbs noautoloadmdicons placeholder="Type to start searching"></ninja-keys> <script src="/assets/al_search/js/search-setup.js"></script> <script>
+// get the ninja-keys element
+const ninja = document.querySelector('ninja-keys');
+
+// add the home and posts menu items
+ninja.data = [{
+    id: "nav-about",
+    title: "about",
+    section: "Navigation",
+    handler: () => {
+      window.location.href = "/";
+    },
+  },{id: "nav-blog",
+          title: "blog",
+          description: "",
+          section: "Navigation",
+          handler: () => {
+            window.location.href = "/blog/";
+          },
+        },{id: "nav-projects",
+          title: "projects",
+          description: "A collection of projects I build, maintain, and explore.",
+          section: "Navigation",
+          handler: () => {
+            window.location.href = "/projects/";
+          },
+        },{id: "post-sharing-one-debug-uart-between-linux-and-risc-v-with-rpmsg",
+        
+          title: "Sharing One Debug UART Between Linux and RISC-V with RPMsg",
+        
+        description: "How I replaced cross-core UART contention with a buffered RPMsg log relay, a host-ready handshake, and a race-free startup sequence.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/sharing-one-debug-uart-between-linux-and-riscv-with-rpmsg/";
+          
+        },
+      },{id: "post-designing-reliable-live-data-acquisition-and-file-synchronization-over-ble",
+        
+          title: "Designing Reliable Live Data Acquisition and File Synchronization over BLE",
+        
+        description: "How I separated live waveform preview from lossless file delivery, tailed a growing recording, and made Stop mean drain and verify instead of disconnect.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/designing-reliable-live-data-acquisition-and-file-synchronization-over-ble/";
+          
+        },
+      },{id: "post-crossing-thread-boundaries-safely-in-libevent",
+        
+          title: "Crossing Thread Boundaries Safely in libevent",
+        
+        description: "How I connected a BlueZ GATT thread to a libevent main loop using an eventfd, a protected job queue, and a socketpair response channel.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/crossing-thread-boundaries-in-libevent/";
+          
+        },
+      },{id: "post-understanding-event-driven-i-o-with-libevent-and-libuv",
+        
+          title: "Understanding Event-Driven I/O with libevent and libuv",
+        
+        description: "What I learned about file descriptors, non-blocking I/O, event loops, callbacks, and the boundary between event-driven code and threads.",
+        section: "Posts",
+        handler: () => {
+          
+            window.location.href = "/blog/2026/understanding-event-driven-io-with-libevent-and-libuv/";
+          
+        },
+      },{id: "projects-embedded-fnirs-acquisition-system",
+          title: 'Embedded fNIRS Acquisition System',
+          description: "An event-driven embedded Linux application coordinating Bluetooth, CAN, UART, timers, and a non-blocking sampling state machine.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/fnirs-acquisition/";
+            },},{id: "projects-omnisense-dual",
+          title: 'OmniSense-Dual',
+          description: "A dual-wearable pedestrian safety and navigation system combining multi-sensor perception with spatial haptic feedback.",
+          section: "Projects",handler: () => {
+              window.location.href = "/projects/omnisense-dual/";
+            },},{
+        id: 'social-github',
+        title: 'GitHub',
+        section: 'Socials',
+        handler: () => {
+          window.open("https://github.com/alexjin520", "_blank");
+        },
+      },{
+        id: 'social-rss',
+        title: 'RSS Feed',
+        section: 'Socials',
+        handler: () => {
+          window.open("/feed.xml", "_blank");
+        },
+      },{
+      id: 'light-theme',
+      title: 'Change theme to light',
+      description: 'Change the theme of the site to Light',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("light");
+      },
+    },
+    {
+      id: 'dark-theme',
+      title: 'Change theme to dark',
+      description: 'Change the theme of the site to Dark',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("dark");
+      },
+    },
+    {
+      id: 'system-theme',
+      title: 'Use system default theme',
+      description: 'Change the theme of the site to System Default',
+      section: 'Theme',
+      handler: () => {
+        setThemeSetting("system");
+      },
+    },];
+
+</script> <script src="/assets/al_search/js/shortcut-key.js"></script> </body> </html>
