@@ -1,7 +1,7 @@
 ---
 layout: post
 title: Sharing One Debug UART Between Linux and RISC-V with RPMsg
-date: 2026-08-06 11:45:00 +0800
+date: 2026-08-06 10:30:00 +0800
 description: How I replaced cross-core UART contention with a buffered RPMsg log relay, a host-ready handshake, and a race-free startup sequence.
 tags: [Embedded Linux, RISC-V, RPMsg, Linux Kernel]
 categories: [Technical Notes]
